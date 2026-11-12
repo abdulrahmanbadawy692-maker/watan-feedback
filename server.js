@@ -6,13 +6,14 @@ const { v4: uuidv4 } = require('uuid');
 const path = require('path');
 const rateLimit = require('express-rate-limit');
 const { createClient } = require('@supabase/supabase-js');
+const WebSocket = require('ws');
 
 // ── Config ──────────────────────────────────────────────────
 const PORT = process.env.PORT || 3001;
 const SESSION_SECRET = process.env.SESSION_SECRET || 'wfd-feedback-secret-2026';
 const SUPABASE_URL = process.env.SUPABASE_URL || 'https://xyupooepebzbpaslmfkw.supabase.co';
 const SUPABASE_KEY = process.env.SUPABASE_KEY || '';
-const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
+const supabase = createClient(SUPABASE_URL, SUPABASE_KEY, { realtime: { transport: WebSocket } });
 
 // ── SQLite Setup ────────────────────────────────────────────
 const db = new Database(':memory:');
