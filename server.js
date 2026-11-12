@@ -628,7 +628,7 @@ app.get('/admin/dashboard', requireAdmin, (req, res) => {
   </header>
   ${accessibilityHTML()}${accessibilityJS()}
   <div class="container" style="max-width:1100px;">
-    <h1 class="page-title" data-en="📊 HR <span>Analytics</span>" data-ar="📊 <span>التحليلات</span>">📊 HR <span>Analytics</span></h1>
+    <h1 class="page-title" data-en="📊 HR Analytics" data-ar="📊 التحليلات">📊 HR Analytics</h1>
 
     <!-- Stats Cards -->
     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:16px;margin-bottom:24px;">
@@ -711,7 +711,7 @@ app.get('/admin/manage', requireAdmin, (req, res) => {
   </header>
   ${accessibilityHTML()}${accessibilityJS()}
   <div class="container" style="max-width:900px;">
-    <h1 class="page-title" data-en="👥 Manage <span>Users</span>" data-ar="👥 إدارة <span>المستخدمين</span>">👥 Manage <span>Users</span></h1>
+    <h1 class="page-title" data-en="👥 Manage Users" data-ar="👥 إدارة المستخدمين">👥 Manage Users</h1>
 
     <!-- Add User Form -->
     <div class="card">
