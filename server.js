@@ -279,8 +279,11 @@ function footerHTML() {
 function starsHTML(name, labelEn, labelAr) {
   return `<div class="rating-row">
     <span class="rating-label" data-en="${labelEn}" data-ar="${labelAr}">${labelEn}</span>
-    <div class="stars" id="stars_${name}">
-      ${[1,2,3,4,5].map(i => `<span class="star" data-val="${i}" onclick="setRating('${name}',${i})">★</span>`).join('')}
+    <div style="display:flex;flex-direction:column;align-items:center;gap:2px;">
+      <div class="stars" id="stars_${name}">
+        ${[1,2,3,4,5].map(i => `<span class="star" data-val="${i}" onclick="setRating('${name}',${i})">★</span>`).join('')}
+      </div>
+      <span class="star-label" id="label_${name}" style="font-size:11px;color:#4a6a8a;min-height:16px;"></span>
     </div>
     <input type="hidden" id="r_${name}" value="0">
   </div>`;
@@ -367,7 +370,7 @@ app.get('/dashboard', requireAuth, (req, res) => {
   <body>
   ${headerHTML(user)}
   <div class="container">
-    <h1 class="page-title" data-en="📊 <span>Dashboard</span>" data-ar="📊 <span>لوحة التحكم</span>">📊 <span>Dashboard</span></h1>
+    <h1 class="page-title" data-en="📊 Dashboard" data-ar="📊 لوحة التحكم">📊 Dashboard</h1>
 
     <div style="display:flex;gap:12px;margin-bottom:24px;flex-wrap:wrap;">
       <div style="flex:1;min-width:150px;background:#132a45;border:1px solid rgba(77,166,255,0.2);border-radius:12px;padding:16px;text-align:center;">
@@ -396,6 +399,13 @@ app.get('/dashboard', requireAuth, (req, res) => {
         <span data-en="Your honest opinion helps make the company better for everyone." data-ar="رأيك الصادق يساعد في تحسين الشركة للجميع.">Your honest opinion helps make the company better for everyone.</span>
       </div>
 
+      <div style="display:flex;gap:12px;flex-wrap:wrap;justify-content:center;margin-bottom:16px;padding:10px;background:rgba(77,166,255,0.05);border-radius:8px;">
+        <span style="font-size:11px;color:#dc3545;">★ <span data-en="Bad" data-ar="سيء">Bad</span></span>
+        <span style="font-size:11px;color:#ff6b7a;">★★ <span data-en="Poor" data-ar="ضعيف">Poor</span></span>
+        <span style="font-size:11px;color:#ffc107;">★★★ <span data-en="Good" data-ar="جيد">Good</span></span>
+        <span style="font-size:11px;color:#4da6ff;">★★★★ <span data-en="Very Good" data-ar="جيد جداً">Very Good</span></span>
+        <span style="font-size:11px;color:#4ade80;">★★★★★ <span data-en="Excellent" data-ar="ممتاز">Excellent</span></span>
+      </div>
       <h3 style="font-size:16px;color:#4da6ff;margin-bottom:12px;" data-en="Section 1: Your Job" data-ar="القسم ١: وظيفتك">Section 1: Your Job</h3>
       ${starsHTML('job_satisfaction','How happy are you with your daily tasks?','ما مدى رضاك عن مهامك اليومية؟')}
       ${starsHTML('salary_benefits','How fair is your compensation?','ما مدى عدالة تعويضاتك؟')}
@@ -463,10 +473,13 @@ app.get('/dashboard', requireAuth, (req, res) => {
   </div>
   ${footerHTML()}
   <script>
+  var ratingLabels={1:['Bad','سيء','#dc3545'],2:['Poor','ضعيف','#ff6b7a'],3:['Good','جيد','#ffc107'],4:['Very Good','جيد جداً','#4da6ff'],5:['Excellent','ممتاز','#4ade80']};
   function setRating(name,val){
     document.getElementById('r_'+name).value=val;
     var stars=document.getElementById('stars_'+name).querySelectorAll('.star');
     stars.forEach(function(s,i){s.classList.toggle('active',i<val);});
+    var lb=document.getElementById('label_'+name);
+    if(lb&&ratingLabels[val]){lb.textContent=wfdLang==='ar'?ratingLabels[val][1]:ratingLabels[val][0];lb.style.color=ratingLabels[val][2];}
   }
   async function submitFeedback(){
     var data={
