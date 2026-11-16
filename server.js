@@ -668,6 +668,22 @@ app.post('/api/change-password', requireAuth, (req, res) => {
     cloudUpdate('fb_users', user.id, {password_hash: newHash});
     console.log(`[AUTH] User ${user.id} changed their password`);
     res.json({success:true});
+    // Notify HR admin that password was changed
+    try {
+      const adminEmail = 'admin@watanfirst.com';
+      const notifyHtml = `<div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;background:#0a1628;color:#fff;padding:30px;border-radius:12px;">
+        <h2 style="color:#4da6ff;">🔑 Password Changed</h2>
+        <p style="color:#a0b4cc;">The following user has changed their password:</p>
+        <div style="background:rgba(77,166,255,0.1);border-radius:8px;padding:16px;margin:16px 0;">
+          <p style="color:#fff;margin-bottom:8px;">👤 <strong>Name:</strong> ${dbUser.full_name}</p>
+          <p style="color:#fff;margin-bottom:8px;">📧 <strong>Email:</strong> ${dbUser.email}</p>
+          <p style="color:#fff;">🏢 <strong>Department:</strong> ${dbUser.department}</p>
+        </div>
+        <p style="color:#a0b4cc;font-size:13px;">No action is needed. This is for your records only.</p>
+        <p style="font-size:12px;color:#4a6a8a;">Watan First Digital Feedback System</p>
+      </div>`;
+      sendBrevoEmail(adminEmail, `Password Changed — ${dbUser.full_name}`, notifyHtml);
+    } catch(emailErr) { console.error('[EMAIL] Password change notify:', emailErr.message); }
   } catch(e) { console.error('[ERROR] Change password:', e); res.status(500).json({success:false,message:'Server error.'}); }
 });
 
@@ -958,7 +974,7 @@ app.get('/admin/dashboard', requireAdmin, (req, res) => {
       <h2 class="section-title" data-en="📝 Employee → Supervisor Feedback (Anonymous)" data-ar="📝 تقييم الموظف → المشرف (مجهول)">📝 Employee → Supervisor Feedback (Anonymous)</h2>
       ${empReviews.length === 0 ? '<p style="text-align:center;color:#a0b4cc;padding:20px;">No feedback submitted yet.</p>' : `
       <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin-bottom:20px;">
-        ${ratingFields.map(f => `<div class="rating-tile" data-field="${f.key}" style="background:rgba(77,166,255,0.08);border-radius:10px;padding:14px;text-align:center;"><p style="font-size:11px;color:#a0b4cc;" data-en="${f.en}" data-ar="${f.ar}">${f.en}</p><p style="font-size:22px;font-weight:700;color:#ffc107;">${avg(empReviews,f.key)} ★ ${healthIcon(avg(empReviews,f.key))}</p>${lastMonthReviews.length ? `<p style="margin-top:4px;">${trendIcon(avg(thisMonthReviews,f.key),avg(lastMonthReviews,f.key))} <span style="font-size:10px;color:#4a6a8a;" data-en="vs last month" data-ar="مقارنة بالشهر الماضي">vs last month</span></p>` : ''}</div>`).join('')}
+        ${ratingFields.map(f => `<div class="rating-tile" data-field="${f.key}" style="background:rgba(77,166,255,0.08);border-radius:10px;padding:14px;text-align:center;"><p style="font-size:11px;color:#a0b4cc;" data-en="${f.en}" data-ar="${f.ar}">${f.en}</p><p style="font-size:22px;font-weight:700;color:#ffc107;">${avg(empReviews,f.key)} ★ ${healthIcon(avg(empReviews,f.key))}</p><p style="margin-top:4px;">${lastMonthReviews.length ? `${trendIcon(avg(thisMonthReviews,f.key),avg(lastMonthReviews,f.key))} <span style="font-size:10px;color:#4a6a8a;" data-en="vs last month" data-ar="مقارنة بالشهر الماضي">vs last month</span>` : `<span style="font-size:10px;color:#4da6ff;" data-en="🆕 First month" data-ar="🆕 الشهر الأول">🆕 First month</span>`}</p></div>`).join('')}
       </div>
       <h3 style="font-size:14px;color:#a0b4cc;margin-bottom:12px;" data-en="Anonymous Comments:" data-ar="التعليقات المجهولة:">Anonymous Comments:</h3>
       ${empReviews.filter(r=>r.comment).map(r => `<div style="background:rgba(77,166,255,0.05);border-radius:8px;padding:12px;margin-bottom:8px;"><p style="font-size:13px;color:#e0eaff;">💬 ${escapeHtml(r.comment)}</p><span style="font-size:11px;color:#4a6a8a;">${r.department} · ${fmtDate(r.created_at)}</span></div>`).join('')||'<p style="color:#4a6a8a;font-size:13px;">No comments.</p>'}
