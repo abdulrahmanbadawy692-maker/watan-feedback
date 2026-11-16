@@ -14,6 +14,8 @@ const SESSION_SECRET = process.env.SESSION_SECRET || 'wfd-feedback-secret-2026';
 const SUPABASE_URL = process.env.SUPABASE_URL || 'https://xyupooepebzbpaslmfkw.supabase.co';
 const SUPABASE_KEY = process.env.SUPABASE_KEY || '';
 const supabase = createClient(SUPABASE_URL, SUPABASE_KEY, { realtime: { transport: WebSocket } });
+const BREVO_API_KEY = process.env.BREVO_API_KEY || '';
+const SMTP_FROM_ADDR = 'abdulrahmanbadawy692@gmail.com';
 
 // ── SQLite Setup ────────────────────────────────────────────
 const db = new Database(':memory:');
@@ -55,6 +57,9 @@ db.exec(`
   );
 `);
 
+// Departments table (custom — HR can add/remove)
+db.exec(`CREATE TABLE IF NOT EXISTS fb_departments (name TEXT PRIMARY KEY, created_at TEXT NOT NULL DEFAULT (datetime('now')))`);
+
 // ── Supabase Cloud Sync ─────────────────────────────────────
 async function cloudInsert(table, row) {
   try {
@@ -90,9 +95,30 @@ async function loadFromSupabase() {
         rr++;
       } catch(e) {}
     }
-    console.log(`[DB] ✅ Loaded ${ru} users, ${rr} reviews`);
+    // Load departments
+    let rd = 0;
+    try {
+      const { data: depts } = await supabase.from('fb_departments').select('*');
+      for (const d of (depts||[])) {
+        try { db.prepare('INSERT OR REPLACE INTO fb_departments (name,created_at) VALUES (?,?)').run(d.name,d.created_at); rd++; } catch(e) {}
+      }
+    } catch(e) { console.log('[DB] fb_departments not in Supabase yet — using local only'); }
+    console.log(`[DB] ✅ Loaded ${ru} users, ${rr} reviews, ${rd} departments`);
     return true;
   } catch(e) { console.log('[DB] Load error:', e.message); return false; }
+}
+
+// ── Brevo Email ────────────────────────────────────────────
+async function sendBrevoEmail(to, subject, html) {
+  if (!BREVO_API_KEY) { console.log('[EMAIL] Skipped (no API key) →', to); return; }
+  try {
+    const resp = await fetch('https://api.brevo.com/v3/smtp/email', {
+      method: 'POST',
+      headers: { 'accept': 'application/json', 'content-type': 'application/json', 'api-key': BREVO_API_KEY },
+      body: JSON.stringify({ sender: { name: 'Watan First Digital', email: SMTP_FROM_ADDR }, to: [{ email: to }], subject, htmlContent: html })
+    });
+    console.log('[EMAIL] Sent to', to);
+  } catch(e) { console.error('[EMAIL] Failed:', e.message); }
 }
 
 // ── Prepared Statements ─────────────────────────────────────
@@ -132,6 +158,8 @@ function langToggleScript() {
     document.documentElement.lang=l;
     document.querySelectorAll('[data-en]').forEach(function(el){el.textContent=l==='ar'?(el.getAttribute('data-ar')||el.getAttribute('data-en')):el.getAttribute('data-en');});
     document.querySelectorAll('[data-en-html]').forEach(function(el){el.innerHTML=l==='ar'?(el.getAttribute('data-ar-html')||el.getAttribute('data-en-html')):el.getAttribute('data-en-html');});
+    // Update star rating labels to match language
+    if(typeof ratingLabels!=='undefined'){document.querySelectorAll('.star-label').forEach(function(lb){var id=lb.id.replace('label_','');var val=parseInt(document.getElementById('r_'+id)?.value||0);if(val&&ratingLabels[val]){lb.textContent=l==='ar'?ratingLabels[val][1]:ratingLabels[val][0];}});}
   }
   function toggleLang(){applyLang(wfdLang==='en'?'ar':'en');}
   document.addEventListener('DOMContentLoaded',function(){applyLang(wfdLang);});
@@ -269,7 +297,15 @@ function headerHTML(user) {
     </div>
   </header>
   ${accessibilityHTML()}
-  ${accessibilityJS()}`;
+  ${accessibilityJS()}
+  <script>
+  (function(){
+    if(!sessionStorage.getItem('wfd_fb_session')){
+      window.location.href='/logout';
+      return;
+    }
+  })();
+  </script>`;
 }
 
 function footerHTML() {
@@ -320,7 +356,7 @@ app.get('/', (req, res) => {
   async function doLogin(){var e=document.getElementById('email').value.trim(),p=document.getElementById('pass').value,err=document.getElementById('err');
     err.classList.remove('show');
     try{var r=await fetch('/api/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email:e,password:p})});var d=await r.json();
-      if(d.success){window.location.href='/dashboard';}else{err.textContent=d.message;err.classList.add('show');}}
+      if(d.success){sessionStorage.setItem('wfd_fb_session','1');window.location.href='/dashboard';}else{err.textContent=d.message;err.classList.add('show');}}
     catch(x){err.textContent='Network error.';err.classList.add('show');}}
   </script></body></html>`);
 });
@@ -360,6 +396,9 @@ app.get('/dashboard', requireAuth, (req, res) => {
     myRatings = db.prepare('SELECT * FROM fb_reviews WHERE target_type=\'employee\' AND target_id=? ORDER BY created_at DESC').all(user.id);
   }
 
+  // Get user's own past submissions (visible only to them — still anonymous to HR)
+  const mySubmissions = db.prepare('SELECT * FROM fb_reviews WHERE reviewer_id=? ORDER BY created_at DESC').all(user.id);
+
   // Get team members for supervisor
   let teamMembers = [];
   if (isSuper) {
@@ -387,7 +426,14 @@ app.get('/dashboard', requireAuth, (req, res) => {
       </div>
     </div>
 
-    <!-- SECTION 1: Give Feedback -->
+    <!-- Dashboard Tabs -->
+    <div style="display:flex;gap:0;margin-bottom:24px;border-bottom:2px solid rgba(77,166,255,0.2);">
+      <button class="dash-tab active" onclick="switchDashTab('tab-give')" id="tabBtn-give" style="flex:1;padding:14px 20px;background:rgba(77,166,255,0.12);color:#4da6ff;border:none;border-bottom:3px solid #4da6ff;cursor:pointer;font-size:14px;font-weight:700;font-family:inherit;border-radius:8px 8px 0 0;transition:all .2s;" data-en="${isSuper?'Rate My Team':'Give Feedback'}" data-ar="${isSuper?'قيّم فريقي':'إرسال تقييم'}">${isSuper?'Rate My Team':'Give Feedback'}</button>
+      <button class="dash-tab" onclick="switchDashTab('tab-view')" id="tabBtn-view" style="flex:1;padding:14px 20px;background:transparent;color:#a0b4cc;border:none;border-bottom:3px solid transparent;cursor:pointer;font-size:14px;font-weight:700;font-family:inherit;border-radius:8px 8px 0 0;transition:all .2s;" data-en="${isSuper?'My Feedback':'My Ratings'}" data-ar="${isSuper?'تقييماتي':'تقييماتي'}">${isSuper?'My Feedback':'My Ratings'}</button>
+    </div>
+
+    <!-- TAB 1: Give Feedback / Rate Team -->
+    <div id="tab-give">
     <div class="card">
       <h2 class="section-title" data-en="${isSuper?'📝 Rate Your Team Members':'📝 Submit Anonymous Feedback'}" data-ar="${isSuper?'📝 قيّم أعضاء فريقك':'📝 أرسل تقييمك المجهول'}">${isSuper?'📝 Rate Your Team Members':'📝 Submit Anonymous Feedback'}</h2>
 
@@ -447,7 +493,10 @@ app.get('/dashboard', requireAuth, (req, res) => {
       `}
     </div>
 
-    <!-- SECTION 2: Your Ratings -->
+    </div><!-- end tab-give -->
+
+    <!-- TAB 2: My Ratings / My Feedback -->
+    <div id="tab-view" style="display:none;">
     <div class="card">
       <h2 class="section-title" data-en="${isSuper?'📈 Feedback About You (Anonymous)':'📈 Your Ratings from Supervisor'}" data-ar="${isSuper?'📈 التقييمات عنك (مجهولة)':'📈 تقييماتك من المشرف'}">${isSuper?'📈 Feedback About You (Anonymous)':'📈 Your Ratings from Supervisor'}</h2>
       ${myRatings.length === 0 ? `<p style="text-align:center;color:#a0b4cc;padding:20px;" data-en="No ratings yet." data-ar="لا توجد تقييمات بعد.">No ratings yet.</p>` :
@@ -470,9 +519,55 @@ app.get('/dashboard', requireAuth, (req, res) => {
         </div>`).join('')
       }
     </div>
+    <!-- My Past Submissions (visible only to the user themselves) -->
+    <div class="card" style="margin-top:20px;">
+      <h2 class="section-title" data-en="📋 My Past Submissions" data-ar="📋 تقييماتي السابقة">📋 My Past Submissions</h2>
+      <p style="font-size:12px;color:#a0b4cc;margin-bottom:16px;background:rgba(77,166,255,0.06);padding:10px;border-radius:8px;" data-en="🔒 Only you can see this — HR sees anonymous averages, not your individual ratings." data-ar="🔒 أنت فقط تستطيع رؤية هذا — الموارد البشرية ترى المعدلات المجهولة فقط.">🔒 Only you can see this — HR sees anonymous averages, not your individual ratings.</p>
+      ${mySubmissions.length === 0 ? `<p style="text-align:center;color:#a0b4cc;padding:20px;" data-en="You haven't submitted any feedback yet." data-ar="لم ترسل أي تقييم بعد.">You haven't submitted any feedback yet.</p>` :
+        mySubmissions.map(r => {
+          const subDate = new Date(r.created_at+'Z').toLocaleDateString('en-US',{year:'numeric',month:'short'});
+          if (r.reviewer_role === 'employee') {
+            return `<div class="emp-card"><p style="font-size:12px;color:#a0b4cc;margin-bottom:10px;">${subDate} · <span data-en="Employee Feedback" data-ar="تقييم موظف">Employee Feedback</span></p>
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;">
+                <div><span style="font-size:11px;color:#a0b4cc;">Job Satisfaction</span> <span style="color:#ffc107;">${'★'.repeat(r.job_satisfaction||0)}${'☆'.repeat(5-(r.job_satisfaction||0))}</span></div>
+                <div><span style="font-size:11px;color:#a0b4cc;">Salary & Benefits</span> <span style="color:#ffc107;">${'★'.repeat(r.salary_benefits||0)}${'☆'.repeat(5-(r.salary_benefits||0))}</span></div>
+                <div><span style="font-size:11px;color:#a0b4cc;">Growth & Training</span> <span style="color:#ffc107;">${'★'.repeat(r.growth_training||0)}${'☆'.repeat(5-(r.growth_training||0))}</span></div>
+                <div><span style="font-size:11px;color:#a0b4cc;">Sup. Communication</span> <span style="color:#ffc107;">${'★'.repeat(r.sup_communication||0)}${'☆'.repeat(5-(r.sup_communication||0))}</span></div>
+                <div><span style="font-size:11px;color:#a0b4cc;">Sup. Support</span> <span style="color:#ffc107;">${'★'.repeat(r.sup_support||0)}${'☆'.repeat(5-(r.sup_support||0))}</span></div>
+                <div><span style="font-size:11px;color:#a0b4cc;">Sup. Fairness</span> <span style="color:#ffc107;">${'★'.repeat(r.sup_fairness||0)}${'☆'.repeat(5-(r.sup_fairness||0))}</span></div>
+                <div><span style="font-size:11px;color:#a0b4cc;">Teamwork</span> <span style="color:#ffc107;">${'★'.repeat(r.team_teamwork||0)}${'☆'.repeat(5-(r.team_teamwork||0))}</span></div>
+                <div><span style="font-size:11px;color:#a0b4cc;">Respect</span> <span style="color:#ffc107;">${'★'.repeat(r.team_respect||0)}${'☆'.repeat(5-(r.team_respect||0))}</span></div>
+              </div>
+              ${r.comment?`<p style="margin-top:8px;font-size:13px;color:#a0b4cc;">💬 ${escapeHtml(r.comment)}</p>`:''}
+            </div>`;
+          } else {
+            const tgt = getUserById.get(r.target_id);
+            return `<div class="emp-card"><p style="font-size:12px;color:#a0b4cc;margin-bottom:10px;">${subDate} · <span data-en="Rating for" data-ar="تقييم لـ">Rating for</span> ${tgt?escapeHtml(tgt.full_name):'Employee'}</p>
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;">
+                <div><span style="font-size:11px;color:#a0b4cc;">Performance</span> <span style="color:#ffc107;">${'★'.repeat(r.emp_performance||0)}${'☆'.repeat(5-(r.emp_performance||0))}</span></div>
+                <div><span style="font-size:11px;color:#a0b4cc;">Punctuality</span> <span style="color:#ffc107;">${'★'.repeat(r.emp_punctuality||0)}${'☆'.repeat(5-(r.emp_punctuality||0))}</span></div>
+                <div><span style="font-size:11px;color:#a0b4cc;">Attitude</span> <span style="color:#ffc107;">${'★'.repeat(r.emp_attitude||0)}${'☆'.repeat(5-(r.emp_attitude||0))}</span></div>
+                <div><span style="font-size:11px;color:#a0b4cc;">Initiative</span> <span style="color:#ffc107;">${'★'.repeat(r.emp_initiative||0)}${'☆'.repeat(5-(r.emp_initiative||0))}</span></div>
+              </div>
+              ${r.sup_comment?`<p style="margin-top:8px;font-size:13px;color:#a0b4cc;">💬 ${escapeHtml(r.sup_comment)}</p>`:''}
+            </div>`;
+          }
+        }).join('')}
+    </div>
+    </div><!-- end tab-view -->
   </div>
   ${footerHTML()}
   <script>
+  function switchDashTab(tabId){
+    document.getElementById('tab-give').style.display=tabId==='tab-give'?'block':'none';
+    document.getElementById('tab-view').style.display=tabId==='tab-view'?'block':'none';
+    document.getElementById('tabBtn-give').style.background=tabId==='tab-give'?'rgba(77,166,255,0.12)':'transparent';
+    document.getElementById('tabBtn-give').style.color=tabId==='tab-give'?'#4da6ff':'#a0b4cc';
+    document.getElementById('tabBtn-give').style.borderBottomColor=tabId==='tab-give'?'#4da6ff':'transparent';
+    document.getElementById('tabBtn-view').style.background=tabId==='tab-view'?'rgba(77,166,255,0.12)':'transparent';
+    document.getElementById('tabBtn-view').style.color=tabId==='tab-view'?'#4da6ff':'#a0b4cc';
+    document.getElementById('tabBtn-view').style.borderBottomColor=tabId==='tab-view'?'#4da6ff':'transparent';
+  }
   var ratingLabels={1:['Bad','سيء','#dc3545'],2:['Poor','ضعيف','#ff6b7a'],3:['Good','جيد','#ffc107'],4:['Very Good','جيد جداً','#4da6ff'],5:['Excellent','ممتاز','#4ade80']};
   function setRating(name,val){
     document.getElementById('r_'+name).value=val;
@@ -530,6 +625,34 @@ app.post('/api/feedback', requireAuth, (req, res) => {
       .run(id, user.id, 'employee', 'supervisor', null, dbUser.department, job_satisfaction, salary_benefits, growth_training, sup_communication, sup_support, sup_fairness, team_teamwork, team_respect, comment||null, new Date().toISOString());
     cloudInsert('fb_reviews', {id, reviewer_id:user.id, reviewer_role:'employee', target_type:'supervisor', department:dbUser.department, job_satisfaction, salary_benefits, growth_training, sup_communication, sup_support, sup_fairness, team_teamwork, team_respect, comment:comment||null, created_at:new Date().toISOString()});
     res.json({success:true});
+
+    // Email supervisors in this department with anonymous avg ratings
+    try {
+      const supervisors = db.prepare("SELECT * FROM fb_users WHERE department=? AND role='supervisor' AND is_admin=0").all(dbUser.department);
+      const deptReviews = db.prepare("SELECT * FROM fb_reviews WHERE reviewer_role='employee' AND department=?").all(dbUser.department);
+      if (supervisors.length && deptReviews.length) {
+        const calcAvg = (arr, f) => { const v = arr.filter(r=>r[f]); return v.length ? (v.reduce((s,r)=>s+r[f],0)/v.length).toFixed(1) : '—'; };
+        const emailHtml = `<div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;background:#0a1628;color:#fff;padding:30px;border-radius:12px;">
+          <h2 style="color:#4da6ff;">New Anonymous Feedback Received</h2>
+          <p style="color:#a0b4cc;">Department: <strong>${dbUser.department}</strong></p>
+          <p style="color:#a0b4cc;">A team member has submitted anonymous feedback. Here are the current department averages:</p>
+          <table style="width:100%;border-collapse:collapse;margin:16px 0;">
+            <tr><td style="padding:8px;color:#a0b4cc;">Job Satisfaction</td><td style="padding:8px;color:#ffc107;font-weight:700;">${calcAvg(deptReviews,'job_satisfaction')} / 5</td></tr>
+            <tr><td style="padding:8px;color:#a0b4cc;">Salary & Benefits</td><td style="padding:8px;color:#ffc107;font-weight:700;">${calcAvg(deptReviews,'salary_benefits')} / 5</td></tr>
+            <tr><td style="padding:8px;color:#a0b4cc;">Growth & Training</td><td style="padding:8px;color:#ffc107;font-weight:700;">${calcAvg(deptReviews,'growth_training')} / 5</td></tr>
+            <tr><td style="padding:8px;color:#a0b4cc;">Communication</td><td style="padding:8px;color:#ffc107;font-weight:700;">${calcAvg(deptReviews,'sup_communication')} / 5</td></tr>
+            <tr><td style="padding:8px;color:#a0b4cc;">Support</td><td style="padding:8px;color:#ffc107;font-weight:700;">${calcAvg(deptReviews,'sup_support')} / 5</td></tr>
+            <tr><td style="padding:8px;color:#a0b4cc;">Fairness</td><td style="padding:8px;color:#ffc107;font-weight:700;">${calcAvg(deptReviews,'sup_fairness')} / 5</td></tr>
+            <tr><td style="padding:8px;color:#a0b4cc;">Teamwork</td><td style="padding:8px;color:#ffc107;font-weight:700;">${calcAvg(deptReviews,'team_teamwork')} / 5</td></tr>
+            <tr><td style="padding:8px;color:#a0b4cc;">Respect</td><td style="padding:8px;color:#ffc107;font-weight:700;">${calcAvg(deptReviews,'team_respect')} / 5</td></tr>
+          </table>
+          <p style="font-size:12px;color:#4a6a8a;">This is an automated notification from Watan First Digital Feedback System.</p>
+        </div>`;
+        for (const sup of supervisors) {
+          sendBrevoEmail(sup.email, `New Anonymous Feedback — ${dbUser.department}`, emailHtml);
+        }
+      }
+    } catch(emailErr) { console.error('[EMAIL] Feedback notify error:', emailErr.message); }
   } catch(e) { console.error('[ERROR] Feedback:', e); res.status(500).json({success:false,message:'Server error.'}); }
 });
 
@@ -546,13 +669,38 @@ app.post('/api/supervisor-review', requireAuth, (req, res) => {
 
     const { reviews } = req.body;
     if (!reviews || !reviews.length) return res.status(400).json({success:false,message:'No reviews.'});
+    const savedReviews = [];
     for (const r of reviews) {
       const id = uuidv4();
       db.prepare('INSERT INTO fb_reviews (id,reviewer_id,reviewer_role,target_type,target_id,department,emp_performance,emp_punctuality,emp_attitude,emp_initiative,sup_comment,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)')
         .run(id, user.id, 'supervisor', 'employee', r.target_id, dbUser.department, r.emp_performance, r.emp_punctuality, r.emp_attitude, r.emp_initiative, r.sup_comment||null, new Date().toISOString());
       cloudInsert('fb_reviews', {id, reviewer_id:user.id, reviewer_role:'supervisor', target_type:'employee', target_id:r.target_id, department:dbUser.department, emp_performance:r.emp_performance, emp_punctuality:r.emp_punctuality, emp_attitude:r.emp_attitude, emp_initiative:r.emp_initiative, sup_comment:r.sup_comment||null, created_at:new Date().toISOString()});
+      savedReviews.push(r);
     }
     res.json({success:true});
+
+    // Email each rated employee with their ratings
+    try {
+      for (const r of savedReviews) {
+        const emp = getUserById.get(r.target_id);
+        if (!emp) continue;
+        const starRow = (label, val) => `<tr><td style="padding:8px;color:#a0b4cc;">${label}</td><td style="padding:8px;color:#ffc107;font-weight:700;">${'★'.repeat(val||0)}${'☆'.repeat(5-(val||0))} (${val}/5)</td></tr>`;
+        const emailHtml = `<div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;background:#0a1628;color:#fff;padding:30px;border-radius:12px;">
+          <h2 style="color:#4da6ff;">Your Supervisor Has Rated You</h2>
+          <p style="color:#a0b4cc;">Hello <strong>${emp.full_name}</strong>, your supervisor has submitted new ratings for you.</p>
+          <table style="width:100%;border-collapse:collapse;margin:16px 0;">
+            ${starRow('Performance', r.emp_performance)}
+            ${starRow('Punctuality', r.emp_punctuality)}
+            ${starRow('Attitude', r.emp_attitude)}
+            ${starRow('Initiative', r.emp_initiative)}
+          </table>
+          ${r.sup_comment ? `<div style="background:rgba(77,166,255,0.1);border-radius:8px;padding:12px;margin:12px 0;"><p style="color:#a0b4cc;font-size:14px;">Supervisor Comment: "${r.sup_comment}"</p></div>` : ''}
+          <p style="color:#a0b4cc;font-size:13px;">Log in to the feedback system to see your full history.</p>
+          <p style="font-size:12px;color:#4a6a8a;">This is an automated notification from Watan First Digital Feedback System.</p>
+        </div>`;
+        sendBrevoEmail(emp.email, 'New Supervisor Rating — Watan First Digital', emailHtml);
+      }
+    } catch(emailErr) { console.error('[EMAIL] Sup review notify error:', emailErr.message); }
   } catch(e) { console.error('[ERROR] Sup review:', e); res.status(500).json({success:false,message:'Server error.'}); }
 });
 
@@ -599,9 +747,11 @@ app.get('/admin/logout', (req, res) => { if(req.session) req.session.admin=null;
 
 // ── HR DASHBOARD ────────────────────────────────────────────
 app.get('/admin/dashboard', requireAdmin, (req, res) => {
+  const filterDept = req.query.dept || '';
   const allReviews = db.prepare('SELECT * FROM fb_reviews ORDER BY created_at DESC').all();
-  const empReviews = allReviews.filter(r => r.reviewer_role === 'employee');
-  const supReviews = allReviews.filter(r => r.reviewer_role === 'supervisor');
+  const filteredReviews = filterDept ? allReviews.filter(r => r.department === filterDept) : allReviews;
+  const empReviews = filteredReviews.filter(r => r.reviewer_role === 'employee');
+  const supReviews = filteredReviews.filter(r => r.reviewer_role === 'supervisor');
   const allEmps = db.prepare('SELECT * FROM fb_users WHERE is_admin=0').all();
   const departments = [...new Set(allEmps.map(u => u.department))];
 
@@ -609,6 +759,35 @@ app.get('/admin/dashboard', requireAdmin, (req, res) => {
   function avg(arr, field) {
     const valid = arr.filter(r => r[field]);
     return valid.length ? (valid.reduce((s,r) => s+r[field], 0) / valid.length).toFixed(1) : '—';
+  }
+  function healthIcon(val) {
+    const n = parseFloat(val);
+    if (isNaN(n)) return '';
+    if (n <= 2) return '<span title="Needs attention" style="font-size:16px;">&#128308;</span>';
+    if (n <= 3.5) return '<span title="Average" style="font-size:16px;">&#128993;</span>';
+    return '<span title="Good" style="font-size:16px;">&#128994;</span>';
+  }
+  const ratingFields = [
+    {key:'job_satisfaction', en:'Job Satisfaction', ar:'الرضا الوظيفي'},
+    {key:'salary_benefits', en:'Salary & Benefits', ar:'الراتب والمزايا'},
+    {key:'growth_training', en:'Growth & Training', ar:'النمو والتدريب'},
+    {key:'sup_communication', en:'Sup. Communication', ar:'تواصل المشرف'},
+    {key:'sup_support', en:'Sup. Support', ar:'دعم المشرف'},
+    {key:'sup_fairness', en:'Sup. Fairness', ar:'عدالة المشرف'},
+    {key:'team_teamwork', en:'Teamwork', ar:'العمل الجماعي'},
+    {key:'team_respect', en:'Respect', ar:'الاحترام'}
+  ];
+  // Build insights
+  const insights = [];
+  if (empReviews.length) {
+    const fieldAvgs = ratingFields.map(f => ({...f, avg: parseFloat(avg(empReviews, f.key))})).filter(f => !isNaN(f.avg));
+    const worst = fieldAvgs.reduce((a,b) => a.avg < b.avg ? a : b, fieldAvgs[0]);
+    const best = fieldAvgs.reduce((a,b) => a.avg > b.avg ? a : b, fieldAvgs[0]);
+    if (worst && worst.avg <= 3) insights.push({type:'warn', en:`${worst.en} needs improvement (${worst.avg}/5)`, ar:`${worst.ar} يحتاج تحسين (${worst.avg}/5)`});
+    if (best && best.avg >= 3.5) insights.push({type:'good', en:`${best.en} is your strongest area (${best.avg}/5)`, ar:`${best.ar} هي أقوى نقاطكم (${best.avg}/5)`});
+    const participation = empReviews.length;
+    const totalEmp = allEmps.filter(u=>u.role==='employee').length;
+    if (totalEmp > 0) insights.push({type:'info', en:`${participation} feedback submissions from ${totalEmp} employees`, ar:`${participation} تقييم من ${totalEmp} موظف`});
   }
   const overallAvg = empReviews.length ? (
     ['job_satisfaction','salary_benefits','growth_training','sup_communication','sup_support','sup_fairness','team_teamwork','team_respect']
@@ -629,6 +808,29 @@ app.get('/admin/dashboard', requireAdmin, (req, res) => {
   ${accessibilityHTML()}${accessibilityJS()}
   <div class="container" style="max-width:1100px;">
     <h1 class="page-title" data-en="📊 HR Analytics" data-ar="📊 التحليلات">📊 HR Analytics</h1>
+
+    <!-- Action Bar: Department Filter + Export + Reminder -->
+    <div style="display:flex;gap:12px;margin-bottom:20px;flex-wrap:wrap;align-items:center;">
+      <div style="flex:1;min-width:200px;">
+        <label style="font-size:12px;color:#a0b4cc;display:block;margin-bottom:4px;" data-en="Filter by Department" data-ar="تصفية حسب القسم">Filter by Department</label>
+        <select id="deptFilter" onchange="filterByDept()" style="width:100%;padding:10px;font-size:14px;color:#fff;background:#0f2035;border:1.5px solid rgba(77,166,255,0.2);border-radius:8px;font-family:inherit;">
+          <option value="" data-en="All Departments" data-ar="جميع الأقسام">All Departments</option>
+          ${departments.map(d => `<option value="${escapeHtml(d)}" ${filterDept===d?'selected':''}>${escapeHtml(d)}</option>`).join('')}
+        </select>
+      </div>
+      <div style="display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap;">
+        <button class="btn" onclick="exportCSV()" style="padding:10px 18px;font-size:13px;" data-en="📥 Export CSV" data-ar="📥 تصدير CSV">📥 Export CSV</button>
+        <button class="btn" onclick="sendReminder()" style="padding:10px 18px;font-size:13px;background:linear-gradient(135deg,#ffc107,#e6a800);" data-en="📧 Send Monthly Reminder" data-ar="📧 إرسال تذكير شهري">📧 Send Monthly Reminder</button>
+      </div>
+    </div>
+
+    <!-- Quick Insights -->
+    ${insights.length ? `<div style="margin-bottom:20px;display:flex;flex-direction:column;gap:8px;">
+      ${insights.map(ins => `<div style="background:${ins.type==='warn'?'rgba(255,193,7,0.1)':ins.type==='good'?'rgba(40,167,69,0.1)':'rgba(77,166,255,0.1)'};border:1px solid ${ins.type==='warn'?'rgba(255,193,7,0.3)':ins.type==='good'?'rgba(40,167,69,0.3)':'rgba(77,166,255,0.3)'};border-radius:10px;padding:12px 16px;display:flex;align-items:center;gap:10px;">
+        <span style="font-size:18px;">${ins.type==='warn'?'&#9888;&#65039;':ins.type==='good'?'&#9989;':'&#8505;&#65039;'}</span>
+        <span style="font-size:14px;font-weight:600;color:${ins.type==='warn'?'#ffc107':ins.type==='good'?'#4ade80':'#4da6ff'};" data-en="${ins.en}" data-ar="${ins.ar}">${ins.en}</span>
+      </div>`).join('')}
+    </div>` : ''}
 
     <!-- Stats Cards -->
     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:16px;margin-bottom:24px;">
@@ -655,14 +857,7 @@ app.get('/admin/dashboard', requireAdmin, (req, res) => {
       <h2 class="section-title" data-en="📝 Employee → Supervisor Feedback (Anonymous)" data-ar="📝 تقييم الموظف → المشرف (مجهول)">📝 Employee → Supervisor Feedback (Anonymous)</h2>
       ${empReviews.length === 0 ? '<p style="text-align:center;color:#a0b4cc;padding:20px;">No feedback submitted yet.</p>' : `
       <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin-bottom:20px;">
-        <div style="background:rgba(77,166,255,0.08);border-radius:10px;padding:14px;text-align:center;"><p style="font-size:11px;color:#a0b4cc;" data-en="Job Satisfaction" data-ar="الرضا الوظيفي">Job Satisfaction</p><p style="font-size:22px;font-weight:700;color:#ffc107;">${avg(empReviews,'job_satisfaction')} ★</p></div>
-        <div style="background:rgba(77,166,255,0.08);border-radius:10px;padding:14px;text-align:center;"><p style="font-size:11px;color:#a0b4cc;" data-en="Salary & Benefits" data-ar="الراتب والمزايا">Salary & Benefits</p><p style="font-size:22px;font-weight:700;color:#ffc107;">${avg(empReviews,'salary_benefits')} ★</p></div>
-        <div style="background:rgba(77,166,255,0.08);border-radius:10px;padding:14px;text-align:center;"><p style="font-size:11px;color:#a0b4cc;" data-en="Growth & Training" data-ar="النمو والتدريب">Growth & Training</p><p style="font-size:22px;font-weight:700;color:#ffc107;">${avg(empReviews,'growth_training')} ★</p></div>
-        <div style="background:rgba(77,166,255,0.08);border-radius:10px;padding:14px;text-align:center;"><p style="font-size:11px;color:#a0b4cc;" data-en="Sup. Communication" data-ar="تواصل المشرف">Sup. Communication</p><p style="font-size:22px;font-weight:700;color:#ffc107;">${avg(empReviews,'sup_communication')} ★</p></div>
-        <div style="background:rgba(77,166,255,0.08);border-radius:10px;padding:14px;text-align:center;"><p style="font-size:11px;color:#a0b4cc;" data-en="Sup. Support" data-ar="دعم المشرف">Sup. Support</p><p style="font-size:22px;font-weight:700;color:#ffc107;">${avg(empReviews,'sup_support')} ★</p></div>
-        <div style="background:rgba(77,166,255,0.08);border-radius:10px;padding:14px;text-align:center;"><p style="font-size:11px;color:#a0b4cc;" data-en="Sup. Fairness" data-ar="عدالة المشرف">Sup. Fairness</p><p style="font-size:22px;font-weight:700;color:#ffc107;">${avg(empReviews,'sup_fairness')} ★</p></div>
-        <div style="background:rgba(77,166,255,0.08);border-radius:10px;padding:14px;text-align:center;"><p style="font-size:11px;color:#a0b4cc;" data-en="Teamwork" data-ar="العمل الجماعي">Teamwork</p><p style="font-size:22px;font-weight:700;color:#ffc107;">${avg(empReviews,'team_teamwork')} ★</p></div>
-        <div style="background:rgba(77,166,255,0.08);border-radius:10px;padding:14px;text-align:center;"><p style="font-size:11px;color:#a0b4cc;" data-en="Respect" data-ar="الاحترام">Respect</p><p style="font-size:22px;font-weight:700;color:#ffc107;">${avg(empReviews,'team_respect')} ★</p></div>
+        ${ratingFields.map(f => `<div class="rating-tile" data-field="${f.key}" style="background:rgba(77,166,255,0.08);border-radius:10px;padding:14px;text-align:center;"><p style="font-size:11px;color:#a0b4cc;" data-en="${f.en}" data-ar="${f.ar}">${f.en}</p><p style="font-size:22px;font-weight:700;color:#ffc107;">${avg(empReviews,f.key)} ★ ${healthIcon(avg(empReviews,f.key))}</p></div>`).join('')}
       </div>
       <h3 style="font-size:14px;color:#a0b4cc;margin-bottom:12px;" data-en="Anonymous Comments:" data-ar="التعليقات المجهولة:">Anonymous Comments:</h3>
       ${empReviews.filter(r=>r.comment).map(r => `<div style="background:rgba(77,166,255,0.05);border-radius:8px;padding:12px;margin-bottom:8px;"><p style="font-size:13px;color:#e0eaff;">💬 ${escapeHtml(r.comment)}</p><span style="font-size:11px;color:#4a6a8a;">${r.department} · ${new Date(r.created_at+'Z').toLocaleDateString('en-US',{year:'numeric',month:'short'})}</span></div>`).join('')||'<p style="color:#4a6a8a;font-size:13px;">No comments.</p>'}
@@ -692,12 +887,33 @@ app.get('/admin/dashboard', requireAdmin, (req, res) => {
     </div>
   </div>
   ${footerHTML()}
+  <script>
+  function filterByDept(){
+    var dept=document.getElementById('deptFilter').value;
+    window.location.href='/admin/dashboard'+(dept?'?dept='+encodeURIComponent(dept):'');
+  }
+  function exportCSV(){
+    var dept=document.getElementById('deptFilter').value;
+    window.location.href='/api/export/feedback-csv'+(dept?'?dept='+encodeURIComponent(dept):'');
+  }
+  async function sendReminder(){
+    if(!confirm('Send reminder emails to all employees who have not submitted feedback this month?'))return;
+    try{
+      var r=await fetch('/api/admin/send-reminder',{method:'POST',headers:{'Content-Type':'application/json'}});
+      var d=await r.json();
+      if(d.success){wfdAlert(d.message||'Reminders sent!','success');}
+      else{wfdAlert(d.message||'Error sending reminders.','error');}
+    }catch(e){wfdAlert('Network error.','error');}
+  }
+  function wfdAlert(msg,type,cb){var ic=type==='success'?'\\u2705':type==='error'?'\\u274C':'\\u2139\\uFE0F';var cl=type==='success'?'#28a745':type==='error'?'#dc3545':'#4da6ff';var t=document.createElement('div');t.style.cssText='position:fixed;top:20px;left:50%;transform:translateX(-50%);z-index:99999;background:#132a45;border:1px solid '+cl+';border-radius:12px;padding:14px 24px;display:flex;align-items:center;gap:12px;box-shadow:0 8px 30px rgba(0,0,0,0.4);max-width:500px;width:90%;';t.innerHTML='<span style="font-size:24px;flex-shrink:0;">'+ic+'</span><p style="font-size:14px;color:#fff;line-height:1.4;flex:1;">'+msg+'</p><button style="padding:6px 16px;background:'+cl+';color:#fff;border:none;border-radius:6px;font-size:12px;font-weight:600;cursor:pointer;font-family:inherit;flex-shrink:0;">OK</button>';t.querySelector('button').onclick=function(){t.remove();if(cb)cb();};document.body.appendChild(t);if(!cb)setTimeout(function(){if(t.parentNode)t.remove();},4000);}
+  </script>
   </body></html>`);
 });
 
 // ── MANAGE USERS ────────────────────────────────────────────
 app.get('/admin/manage', requireAdmin, (req, res) => {
   const allUsers = db.prepare('SELECT * FROM fb_users WHERE is_admin=0 ORDER BY department,role,full_name').all();
+  const departments = db.prepare('SELECT name FROM fb_departments ORDER BY name').all().map(d => d.name);
   res.send(`${pageHead('Manage Users')}
   <body>
   <header class="header">
@@ -722,14 +938,7 @@ app.get('/admin/manage', requireAdmin, (req, res) => {
         <div class="form-group"><label data-en="Password" data-ar="كلمة المرور">Password</label><input type="text" id="aPassAdd" placeholder="e.g. Employee123$"></div>
         <div class="form-group"><label data-en="Department" data-ar="القسم">Department</label>
           <select id="aDept">
-            <option value="Human Resources">Human Resources</option>
-            <option value="Engineering">Engineering</option>
-            <option value="Operations">Operations</option>
-            <option value="Sales">Sales</option>
-            <option value="Marketing">Marketing</option>
-            <option value="Finance">Finance</option>
-            <option value="Medical">Medical</option>
-            <option value="Hospitality">Hospitality</option>
+            ${departments.map(d => `<option value="${escapeHtml(d)}">${escapeHtml(d)}</option>`).join('')}
           </select>
         </div>
         <div class="form-group"><label data-en="Role" data-ar="الدور">Role</label>
@@ -738,6 +947,22 @@ app.get('/admin/manage', requireAdmin, (req, res) => {
       </div>
       <button class="btn" onclick="addUser()" data-en="Add User" data-ar="إضافة مستخدم">Add User</button>
       <div id="addMsg" style="display:none;margin-top:10px;padding:10px;border-radius:8px;font-size:13px;"></div>
+    </div>
+
+    <!-- Manage Departments -->
+    <div class="card">
+      <h2 class="section-title" data-en="🏢 Manage Departments" data-ar="🏢 إدارة الأقسام">🏢 Manage Departments</h2>
+      <div style="display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap;">
+        <input type="text" id="newDept" placeholder="New department name..." style="flex:1;min-width:200px;padding:10px;font-size:14px;color:#fff;background:#0f2035;border:1.5px solid rgba(77,166,255,0.2);border-radius:8px;font-family:inherit;">
+        <button class="btn" onclick="addDept()" style="padding:10px 20px;font-size:13px;" data-en="➕ Add" data-ar="➕ إضافة">➕ Add</button>
+      </div>
+      <div style="display:flex;flex-wrap:wrap;gap:8px;">
+        ${departments.map(d => `<div style="display:inline-flex;align-items:center;gap:6px;background:rgba(77,166,255,0.08);border:1px solid rgba(77,166,255,0.2);border-radius:20px;padding:6px 14px;">
+          <span style="font-size:13px;color:#fff;">${escapeHtml(d)}</span>
+          <button onclick="removeDept('${escapeHtml(d).replace(/'/g,"\\'")}')" style="background:none;border:none;color:#ff6b7a;cursor:pointer;font-size:14px;padding:0 2px;" title="Remove">✕</button>
+        </div>`).join('')}
+        ${departments.length===0?'<p style="color:#a0b4cc;font-size:13px;" data-en="No departments yet. Add one above." data-ar="لا توجد أقسام. أضف واحداً أعلاه.">No departments yet. Add one above.</p>':''}
+      </div>
     </div>
 
     <!-- User List -->
@@ -773,6 +998,19 @@ app.get('/admin/manage', requireAdmin, (req, res) => {
       else{wfdAlert(d.message,'error');}}
     catch(x){wfdAlert('Network error.','error');}
   }
+  async function addDept(){var n=document.getElementById('newDept').value.trim();
+    if(!n){wfdAlert('Please enter a department name.','error');return;}
+    try{var r=await fetch('/api/admin/add-department',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:n})});var d=await r.json();
+      if(d.success){wfdAlert('Department added!','success',function(){location.reload();});}
+      else{wfdAlert(d.message,'error');}}
+    catch(x){wfdAlert('Network error.','error');}
+  }
+  async function removeDept(name){if(!confirm('Remove department "'+name+'"? Existing users in this department will NOT be affected.'))return;
+    try{var r=await fetch('/api/admin/delete-department/'+encodeURIComponent(name),{method:'DELETE'});var d=await r.json();
+      if(d.success){wfdAlert('Department removed.','success',function(){location.reload();});}
+      else{wfdAlert(d.message,'error');}}
+    catch(x){wfdAlert('Network error.','error');}
+  }
   </script></body></html>`);
 });
 
@@ -802,10 +1040,94 @@ app.delete('/api/admin/delete-user/:id', requireAdmin, async (req, res) => {
   } catch(e) { res.status(500).json({success:false,message:'Server error.'}); }
 });
 
+// ── DEPARTMENT MANAGEMENT ──────────────────────────────────
+app.post('/api/admin/add-department', requireAdmin, (req, res) => {
+  try {
+    const { name } = req.body;
+    if (!name||!name.trim()) return res.status(400).json({success:false,message:'Department name required.'});
+    const deptName = name.trim();
+    const existing = db.prepare('SELECT name FROM fb_departments WHERE name=?').get(deptName);
+    if (existing) return res.status(400).json({success:false,message:'Department already exists.'});
+    db.prepare('INSERT INTO fb_departments (name,created_at) VALUES (?,?)').run(deptName, new Date().toISOString());
+    // Try cloud sync (table may not exist yet)
+    try { supabase.from('fb_departments').upsert({name:deptName, created_at:new Date().toISOString()},{onConflict:'name'}).then(()=>{}); } catch(e) {}
+    res.json({success:true});
+  } catch(e) { res.status(500).json({success:false,message:'Server error.'}); }
+});
+
+app.delete('/api/admin/delete-department/:name', requireAdmin, (req, res) => {
+  try {
+    const deptName = decodeURIComponent(req.params.name);
+    db.prepare('DELETE FROM fb_departments WHERE name=?').run(deptName);
+    try { supabase.from('fb_departments').delete().eq('name', deptName).then(()=>{}); } catch(e) {}
+    res.json({success:true});
+  } catch(e) { res.status(500).json({success:false,message:'Server error.'}); }
+});
+
+// ── EXPORT CSV ─────────────────────────────────────────────
+app.get('/api/export/feedback-csv', requireAdmin, (req, res) => {
+  try {
+    const filterDept = req.query.dept || '';
+    let reviews = db.prepare('SELECT * FROM fb_reviews ORDER BY created_at DESC').all();
+    if (filterDept) reviews = reviews.filter(r => r.department === filterDept);
+
+    const headers = ['Date','Department','Reviewer Role','Target Type','Job Satisfaction','Salary Benefits','Growth Training','Sup Communication','Sup Support','Sup Fairness','Team Teamwork','Team Respect','Emp Performance','Emp Punctuality','Emp Attitude','Emp Initiative','Comment','Sup Comment'];
+    const csvRows = [headers.join(',')];
+    for (const r of reviews) {
+      const row = [
+        r.created_at, r.department, r.reviewer_role, r.target_type,
+        r.job_satisfaction||'', r.salary_benefits||'', r.growth_training||'',
+        r.sup_communication||'', r.sup_support||'', r.sup_fairness||'',
+        r.team_teamwork||'', r.team_respect||'',
+        r.emp_performance||'', r.emp_punctuality||'', r.emp_attitude||'', r.emp_initiative||'',
+        `"${(r.comment||'').replace(/"/g,'""')}"`, `"${(r.sup_comment||'').replace(/"/g,'""')}"`
+      ];
+      csvRows.push(row.join(','));
+    }
+    const csv = csvRows.join('\n');
+    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader('Content-Disposition', `attachment; filename="feedback_export_${new Date().toISOString().slice(0,10)}.csv"`);
+    res.send(csv);
+  } catch(e) { console.error('[ERROR] CSV export:', e); res.status(500).json({success:false,message:'Export failed.'}); }
+});
+
+// ── SEND MONTHLY REMINDER ──────────────────────────────────
+app.post('/api/admin/send-reminder', requireAdmin, async (req, res) => {
+  try {
+    const now = new Date();
+    const monthStart = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-01`;
+    const allEmps = db.prepare("SELECT * FROM fb_users WHERE is_admin=0").all();
+    const submittedIds = db.prepare("SELECT DISTINCT reviewer_id FROM fb_reviews WHERE created_at>=?").all(monthStart).map(r => r.reviewer_id);
+    const pending = allEmps.filter(u => !submittedIds.includes(u.id));
+
+    if (pending.length === 0) {
+      return res.json({success:true, message:'All employees have already submitted feedback this month! No reminders needed.'});
+    }
+
+    let sentCount = 0;
+    const monthName = now.toLocaleString('en-US', {month:'long', year:'numeric'});
+    for (const emp of pending) {
+      const emailHtml = `<div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;background:#0a1628;color:#fff;padding:30px;border-radius:12px;">
+        <h2 style="color:#4da6ff;">Monthly Feedback Reminder</h2>
+        <p style="color:#a0b4cc;">Hello <strong>${emp.full_name}</strong>,</p>
+        <p style="color:#a0b4cc;">This is a friendly reminder that you have not yet submitted your anonymous feedback for <strong>${monthName}</strong>.</p>
+        <p style="color:#a0b4cc;">Your honest feedback helps improve the workplace for everyone. It only takes 2 minutes and is completely anonymous.</p>
+        <div style="text-align:center;margin:24px 0;">
+          <span style="display:inline-block;padding:14px 30px;background:linear-gradient(135deg,#4da6ff,#2b8fef);color:#fff;border-radius:8px;font-weight:700;font-size:15px;">Log in to submit your feedback</span>
+        </div>
+        <p style="font-size:12px;color:#4a6a8a;">This is an automated reminder from Watan First Digital Feedback System.</p>
+      </div>`;
+      await sendBrevoEmail(emp.email, `Feedback Reminder — ${monthName}`, emailHtml);
+      sentCount++;
+    }
+    res.json({success:true, message:`Reminders sent to ${sentCount} employee(s) who haven't submitted feedback this month.`});
+  } catch(e) { console.error('[ERROR] Send reminder:', e); res.status(500).json({success:false,message:'Failed to send reminders.'}); }
+});
+
 // ── Start ───────────────────────────────────────────────────
 app.listen(PORT, async () => {
   console.log(`\n=============================================`);
-  console.log(`  Watan First Digital — Feedback System v1`);
+  console.log(`  Watan First Digital — Feedback System v5`);
   console.log(`  Running at:  http://localhost:${PORT}`);
   console.log(`  Admin:       admin@watanfirst.com / Admin123$`);
   console.log(`=============================================`);
@@ -823,6 +1145,16 @@ app.listen(PORT, async () => {
       db.prepare('UPDATE fb_users SET is_admin=1 WHERE id=?').run(adminUser.id);
     }
     console.log('[OK] Admin loaded');
+  }
+  // Seed default departments if none exist
+  const deptCount = db.prepare('SELECT COUNT(*) as c FROM fb_departments').get().c;
+  if (deptCount === 0) {
+    const defaults = ['Design','Development','Digital Marketing','Business Development','Administration'];
+    for (const d of defaults) {
+      db.prepare('INSERT OR IGNORE INTO fb_departments (name,created_at) VALUES (?,?)').run(d, new Date().toISOString());
+      try { supabase.from('fb_departments').upsert({name:d,created_at:new Date().toISOString()},{onConflict:'name'}).then(()=>{}); } catch(e) {}
+    }
+    console.log('[OK] Default departments seeded');
   }
   console.log(`=============================================\n`);
 });
