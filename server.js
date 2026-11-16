@@ -670,7 +670,7 @@ app.post('/api/change-password', requireAuth, (req, res) => {
     res.json({success:true});
     // Notify HR admin that password was changed
     try {
-      const adminEmail = 'admin@watanfirst.com';
+      const adminEmail = SMTP_FROM_ADDR;
       const notifyHtml = `<div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;background:#0a1628;color:#fff;padding:30px;border-radius:12px;">
         <h2 style="color:#4da6ff;">🔑 Password Changed</h2>
         <p style="color:#a0b4cc;">The following user has changed their password:</p>
