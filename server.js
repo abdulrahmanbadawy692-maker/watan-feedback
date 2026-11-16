@@ -832,6 +832,7 @@ app.get('/admin/logout', (req, res) => { if(req.session) req.session.admin=null;
 // ── HR DASHBOARD ────────────────────────────────────────────
 app.get('/admin/dashboard', requireAdmin, (req, res) => {
   const filterDept = req.query.dept || '';
+  const now = new Date();
   const allReviews = db.prepare('SELECT * FROM fb_reviews ORDER BY created_at DESC').all();
   const filteredReviews = filterDept ? allReviews.filter(r => r.department === filterDept) : allReviews;
   const empReviews = filteredReviews.filter(r => r.reviewer_role === 'employee');
