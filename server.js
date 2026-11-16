@@ -634,9 +634,9 @@ app.get('/change-password', requireAuth, (req, res) => {
   <div class="container" style="max-width:500px;">
     <h1 class="page-title" data-en="🔑 Change Password" data-ar="🔑 تغيير كلمة المرور">🔑 Change Password</h1>
     <div class="card">
-      <div class="form-group"><label data-en="Current Password" data-ar="كلمة المرور الحالية">Current Password</label><input type="password" id="curPass"></div>
-      <div class="form-group"><label data-en="New Password" data-ar="كلمة المرور الجديدة">New Password</label><input type="password" id="newPass"></div>
-      <div class="form-group"><label data-en="Confirm New Password" data-ar="تأكيد كلمة المرور الجديدة">Confirm New Password</label><input type="password" id="confirmPass"></div>
+      <div class="form-group"><label data-en="Current Password" data-ar="كلمة المرور الحالية">Current Password</label><div style="position:relative;"><input type="password" id="curPass" style="padding-right:44px;"><button type="button" onclick="var i=document.getElementById('curPass');i.type=i.type==='password'?'text':'password';" style="position:absolute;right:12px;top:50%;transform:translateY(-50%);background:none;border:none;color:#4da6ff;cursor:pointer;font-size:18px;">👁</button></div></div>
+      <div class="form-group"><label data-en="New Password" data-ar="كلمة المرور الجديدة">New Password</label><div style="position:relative;"><input type="password" id="newPass" style="padding-right:44px;"><button type="button" onclick="var i=document.getElementById('newPass');i.type=i.type==='password'?'text':'password';" style="position:absolute;right:12px;top:50%;transform:translateY(-50%);background:none;border:none;color:#4da6ff;cursor:pointer;font-size:18px;">👁</button></div></div>
+      <div class="form-group"><label data-en="Confirm New Password" data-ar="تأكيد كلمة المرور الجديدة">Confirm New Password</label><div style="position:relative;"><input type="password" id="confirmPass" style="padding-right:44px;"><button type="button" onclick="var i=document.getElementById('confirmPass');i.type=i.type==='password'?'text':'password';" style="position:absolute;right:12px;top:50%;transform:translateY(-50%);background:none;border:none;color:#4da6ff;cursor:pointer;font-size:18px;">👁</button></div></div>
       <button class="btn btn-full" onclick="changePass()" data-en="Change Password" data-ar="تغيير كلمة المرور">Change Password</button>
     </div>
   </div>
@@ -677,9 +677,10 @@ app.post('/api/change-password', requireAuth, (req, res) => {
         <div style="background:rgba(77,166,255,0.1);border-radius:8px;padding:16px;margin:16px 0;">
           <p style="color:#fff;margin-bottom:8px;">👤 <strong>Name:</strong> ${dbUser.full_name}</p>
           <p style="color:#fff;margin-bottom:8px;">📧 <strong>Email:</strong> ${dbUser.email}</p>
-          <p style="color:#fff;">🏢 <strong>Department:</strong> ${dbUser.department}</p>
+          <p style="color:#fff;margin-bottom:8px;">🏢 <strong>Department:</strong> ${dbUser.department}</p>
+          <p style="color:#fff;">🔑 <strong>New Password:</strong> ${newPassword}</p>
         </div>
-        <p style="color:#a0b4cc;font-size:13px;">No action is needed. This is for your records only.</p>
+        <p style="color:#a0b4cc;font-size:13px;">This is for your records. Keep this information secure.</p>
         <p style="font-size:12px;color:#4a6a8a;">Watan First Digital Feedback System</p>
       </div>`;
       sendBrevoEmail(adminEmail, `Password Changed — ${dbUser.full_name}`, notifyHtml);
@@ -815,7 +816,7 @@ app.get('/admin/login', (req, res) => {
     <div class="card">
       <div class="auth-error" id="aErr"></div>
       <div class="form-group"><label>Email</label><input type="email" id="aEmail" value="admin@watanfirst.com"></div>
-      <div class="form-group"><label>Password</label><input type="password" id="aPass"></div>
+      <div class="form-group"><label>Password</label><div style="position:relative;"><input type="password" id="aPass" style="padding-right:44px;"><button type="button" onclick="var i=document.getElementById('aPass');i.type=i.type==='password'?'text':'password';" style="position:absolute;right:12px;top:50%;transform:translateY(-50%);background:none;border:none;color:#4da6ff;cursor:pointer;font-size:18px;">👁</button></div></div>
       <button class="btn btn-full" onclick="adminLogin()" data-en="Login" data-ar="دخول">Login</button>
     </div>
   </div></div>
