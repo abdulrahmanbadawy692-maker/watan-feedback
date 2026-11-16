@@ -148,6 +148,7 @@ function requireAdmin(req, res, next) {
   res.redirect('/admin/login');
 }
 function escapeHtml(s) { return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+function fmtDate(d) { try { const dt = new Date(d && (d.includes('Z')||d.includes('+')) ? d : (d||'')+'Z'); return isNaN(dt.getTime()) ? (d||'').slice(0,10)||'—' : dt.toLocaleDateString('en-US',{year:'numeric',month:'short'}); } catch(e) { return '—'; } }
 
 // ── Shared HTML Helpers ─────────────────────────────────────
 function langToggleScript() {
@@ -386,7 +387,14 @@ app.get('/dashboard', requireAuth, (req, res) => {
   // Check if already submitted this month
   const now = new Date();
   const monthStart = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-01`;
-  const existing = db.prepare('SELECT id FROM fb_reviews WHERE reviewer_id=? AND created_at>=?').get(user.id, monthStart);
+  const existing = db.prepare('SELECT id,created_at FROM fb_reviews WHERE reviewer_id=? AND created_at>=? ORDER BY created_at DESC').get(user.id, monthStart);
+  // Check if within 24h window for delete & resubmit
+  let canDelete = false;
+  if (existing) {
+    const submittedAt = new Date(existing.created_at + 'Z');
+    const hoursSince = (now.getTime() - submittedAt.getTime()) / (1000 * 60 * 60);
+    canDelete = hoursSince <= 24;
+  }
 
   // Get ratings about this user (from supervisors if employee, from employees if supervisor)
   let myRatings = [];
@@ -437,7 +445,7 @@ app.get('/dashboard', requireAuth, (req, res) => {
     <div class="card">
       <h2 class="section-title" data-en="${isSuper?'📝 Rate Your Team Members':'📝 Submit Anonymous Feedback'}" data-ar="${isSuper?'📝 قيّم أعضاء فريقك':'📝 أرسل تقييمك المجهول'}">${isSuper?'📝 Rate Your Team Members':'📝 Submit Anonymous Feedback'}</h2>
 
-      ${existing ? `<div style="text-align:center;padding:20px;"><p style="color:#4ade80;font-size:16px;font-weight:600;" data-en="✅ You already submitted feedback this month" data-ar="✅ لقد أرسلت تقييمك هذا الشهر">✅ You already submitted feedback this month</p><p style="color:#a0b4cc;font-size:13px;margin-top:8px;" data-en="You can submit again next month" data-ar="يمكنك الإرسال مرة أخرى الشهر القادم">You can submit again next month</p></div>` : `
+      ${existing ? `<div style="text-align:center;padding:20px;"><p style="color:#4ade80;font-size:16px;font-weight:600;" data-en="✅ You already submitted feedback this month" data-ar="✅ لقد أرسلت تقييمك هذا الشهر">✅ You already submitted feedback this month</p><p style="color:#a0b4cc;font-size:13px;margin-top:8px;" data-en="You can submit again next month" data-ar="يمكنك الإرسال مرة أخرى الشهر القادم">You can submit again next month</p>${canDelete ? `<button onclick="deleteAndResubmit()" style="margin-top:16px;padding:10px 24px;background:rgba(220,53,69,0.15);color:#ff6b7a;border:1px solid rgba(220,53,69,0.3);border-radius:8px;cursor:pointer;font-size:13px;font-weight:600;font-family:inherit;" data-en="🗑️ Delete & Resubmit (within 24h)" data-ar="🗑️ حذف وإعادة الإرسال (خلال ٢٤ ساعة)">🗑️ Delete & Resubmit (within 24h)</button>` : `<p style="color:#4a6a8a;font-size:12px;margin-top:12px;" data-en="⏰ The 24-hour edit window has passed" data-ar="⏰ انتهت فترة التعديل (٢٤ ساعة)">⏰ The 24-hour edit window has passed</p>`}</div>` : `
 
       ${!isSuper ? `
       <div class="trust-banner">
@@ -508,7 +516,7 @@ app.get('/dashboard', requireAuth, (req, res) => {
         </div>
         <p style="text-align:center;margin-top:12px;color:#a0b4cc;font-size:12px;">${myRatings.length} anonymous review(s)</p>` :
         myRatings.map(r => `<div class="emp-card">
-          <p style="font-size:12px;color:#a0b4cc;margin-bottom:8px;">${new Date(r.created_at+'Z').toLocaleDateString('en-US',{year:'numeric',month:'short'})}</p>
+          <p style="font-size:12px;color:#a0b4cc;margin-bottom:8px;">${fmtDate(r.created_at)}</p>
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
             <div><span style="font-size:12px;color:#a0b4cc;">Performance</span><br><span style="color:#ffc107;">${'★'.repeat(r.emp_performance||0)}${'☆'.repeat(5-(r.emp_performance||0))}</span></div>
             <div><span style="font-size:12px;color:#a0b4cc;">Punctuality</span><br><span style="color:#ffc107;">${'★'.repeat(r.emp_punctuality||0)}${'☆'.repeat(5-(r.emp_punctuality||0))}</span></div>
@@ -525,7 +533,7 @@ app.get('/dashboard', requireAuth, (req, res) => {
       <p style="font-size:12px;color:#a0b4cc;margin-bottom:16px;background:rgba(77,166,255,0.06);padding:10px;border-radius:8px;" data-en="🔒 Only you can see this — HR sees anonymous averages, not your individual ratings." data-ar="🔒 أنت فقط تستطيع رؤية هذا — الموارد البشرية ترى المعدلات المجهولة فقط.">🔒 Only you can see this — HR sees anonymous averages, not your individual ratings.</p>
       ${mySubmissions.length === 0 ? `<p style="text-align:center;color:#a0b4cc;padding:20px;" data-en="You haven't submitted any feedback yet." data-ar="لم ترسل أي تقييم بعد.">You haven't submitted any feedback yet.</p>` :
         mySubmissions.map(r => {
-          const subDate = new Date(r.created_at+'Z').toLocaleDateString('en-US',{year:'numeric',month:'short'});
+          const subDate = fmtDate(r.created_at);
           if (r.reviewer_role === 'employee') {
             return `<div class="emp-card"><p style="font-size:12px;color:#a0b4cc;margin-bottom:10px;">${subDate} · <span data-en="Employee Feedback" data-ar="تقييم موظف">Employee Feedback</span></p>
               <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;">
@@ -605,7 +613,34 @@ app.get('/dashboard', requireAuth, (req, res) => {
       else{wfdAlert(d.message,'error');}}
     catch(e){wfdAlert('Network error.','error');}
   }
+  async function deleteAndResubmit(){
+    if(!confirm('Delete your current feedback and submit a new one?'))return;
+    try{var r=await fetch('/api/feedback/delete-mine',{method:'DELETE'});var d=await r.json();
+      if(d.success){wfdAlert('Feedback deleted. You can now submit again.','success',function(){location.reload();});}
+      else{wfdAlert(d.message,'error');}}
+    catch(e){wfdAlert('Network error.','error');}
+  }
   </script></body></html>`);
+});
+
+// ── DELETE & RESUBMIT (within 24h) ────────────────────────
+app.delete('/api/feedback/delete-mine', requireAuth, async (req, res) => {
+  try {
+    const user = req.session.user;
+    const now = new Date();
+    const monthStart = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-01`;
+    const existing = db.prepare('SELECT id,created_at FROM fb_reviews WHERE reviewer_id=? AND created_at>=? ORDER BY created_at DESC').get(user.id, monthStart);
+    if (!existing) return res.status(400).json({success:false,message:'No feedback to delete.'});
+    const submittedAt = new Date(existing.created_at + 'Z');
+    const hoursSince = (now.getTime() - submittedAt.getTime()) / (1000 * 60 * 60);
+    if (hoursSince > 24) return res.status(400).json({success:false,message:'The 24-hour edit window has passed. You cannot delete this feedback.'});
+    // Delete from SQLite
+    db.prepare('DELETE FROM fb_reviews WHERE id=?').run(existing.id);
+    // Delete from Supabase
+    try { await supabase.from('fb_reviews').delete().eq('id', existing.id); } catch(e) {}
+    console.log(`[FEEDBACK] User ${user.id} deleted their feedback (within 24h window)`);
+    res.json({success:true});
+  } catch(e) { console.error('[ERROR] Delete feedback:', e); res.status(500).json({success:false,message:'Server error.'}); }
 });
 
 // ── FEEDBACK API (anonymous) ────────────────────────────────
@@ -860,7 +895,7 @@ app.get('/admin/dashboard', requireAdmin, (req, res) => {
         ${ratingFields.map(f => `<div class="rating-tile" data-field="${f.key}" style="background:rgba(77,166,255,0.08);border-radius:10px;padding:14px;text-align:center;"><p style="font-size:11px;color:#a0b4cc;" data-en="${f.en}" data-ar="${f.ar}">${f.en}</p><p style="font-size:22px;font-weight:700;color:#ffc107;">${avg(empReviews,f.key)} ★ ${healthIcon(avg(empReviews,f.key))}</p></div>`).join('')}
       </div>
       <h3 style="font-size:14px;color:#a0b4cc;margin-bottom:12px;" data-en="Anonymous Comments:" data-ar="التعليقات المجهولة:">Anonymous Comments:</h3>
-      ${empReviews.filter(r=>r.comment).map(r => `<div style="background:rgba(77,166,255,0.05);border-radius:8px;padding:12px;margin-bottom:8px;"><p style="font-size:13px;color:#e0eaff;">💬 ${escapeHtml(r.comment)}</p><span style="font-size:11px;color:#4a6a8a;">${r.department} · ${new Date(r.created_at+'Z').toLocaleDateString('en-US',{year:'numeric',month:'short'})}</span></div>`).join('')||'<p style="color:#4a6a8a;font-size:13px;">No comments.</p>'}
+      ${empReviews.filter(r=>r.comment).map(r => `<div style="background:rgba(77,166,255,0.05);border-radius:8px;padding:12px;margin-bottom:8px;"><p style="font-size:13px;color:#e0eaff;">💬 ${escapeHtml(r.comment)}</p><span style="font-size:11px;color:#4a6a8a;">${r.department} · ${fmtDate(r.created_at)}</span></div>`).join('')||'<p style="color:#4a6a8a;font-size:13px;">No comments.</p>'}
       `}
     </div>
 
@@ -873,7 +908,7 @@ app.get('/admin/dashboard', requireAdmin, (req, res) => {
           return `<div class="emp-card">
             <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;">
               <div><h3 style="font-size:15px;">${emp?escapeHtml(emp.full_name):'Unknown'}</h3><span class="badge badge-emp">${escapeHtml(r.department)}</span></div>
-              <span style="font-size:12px;color:#4a6a8a;">${new Date(r.created_at+'Z').toLocaleDateString('en-US',{year:'numeric',month:'short'})}</span>
+              <span style="font-size:12px;color:#4a6a8a;">${fmtDate(r.created_at)}</span>
             </div>
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:10px;">
               <div><span style="font-size:11px;color:#a0b4cc;">Performance</span> <span style="color:#ffc107;">${'★'.repeat(r.emp_performance||0)}</span></div>
