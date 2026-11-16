@@ -391,8 +391,9 @@ app.get('/dashboard', requireAuth, (req, res) => {
   // Check if within 24h window for delete & resubmit
   let canDelete = false;
   if (existing) {
-    const submittedAt = new Date(existing.created_at + 'Z');
-    const hoursSince = (now.getTime() - submittedAt.getTime()) / (1000 * 60 * 60);
+    const ca = existing.created_at || '';
+    const submittedAt = new Date(ca.includes('Z') || ca.includes('+') ? ca : ca + 'Z');
+    const hoursSince = isNaN(submittedAt.getTime()) ? 999 : (now.getTime() - submittedAt.getTime()) / (1000 * 60 * 60);
     canDelete = hoursSince <= 24;
   }
 
@@ -631,8 +632,9 @@ app.delete('/api/feedback/delete-mine', requireAuth, async (req, res) => {
     const monthStart = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-01`;
     const existing = db.prepare('SELECT id,created_at FROM fb_reviews WHERE reviewer_id=? AND created_at>=? ORDER BY created_at DESC').get(user.id, monthStart);
     if (!existing) return res.status(400).json({success:false,message:'No feedback to delete.'});
-    const submittedAt = new Date(existing.created_at + 'Z');
-    const hoursSince = (now.getTime() - submittedAt.getTime()) / (1000 * 60 * 60);
+    const ca2 = existing.created_at || '';
+    const submittedAt = new Date(ca2.includes('Z') || ca2.includes('+') ? ca2 : ca2 + 'Z');
+    const hoursSince = isNaN(submittedAt.getTime()) ? 999 : (now.getTime() - submittedAt.getTime()) / (1000 * 60 * 60);
     if (hoursSince > 24) return res.status(400).json({success:false,message:'The 24-hour edit window has passed. You cannot delete this feedback.'});
     // Delete from SQLite
     db.prepare('DELETE FROM fb_reviews WHERE id=?').run(existing.id);
