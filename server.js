@@ -293,6 +293,7 @@ function headerHTML(user) {
     </a>
     <div class="header-nav">
       <a href="/dashboard" data-en="📊 Dashboard" data-ar="📊 لوحة التحكم">📊 Dashboard</a>
+      <a href="/change-password" data-en="🔑 Password" data-ar="🔑 كلمة المرور">🔑 Password</a>
       ${langToggleBtn()} ${darkToggleBtn()}
       <a href="/logout" style="border-color:rgba(220,53,69,0.3);color:#ff6b7a;" data-en="Logout" data-ar="خروج">Logout</a>
     </div>
@@ -624,6 +625,52 @@ app.get('/dashboard', requireAuth, (req, res) => {
   </script></body></html>`);
 });
 
+// ── CHANGE PASSWORD ────────────────────────────────────────
+app.get('/change-password', requireAuth, (req, res) => {
+  const user = req.session.user;
+  res.send(`${pageHead('Change Password')}
+  <body>
+  ${headerHTML(user)}
+  <div class="container" style="max-width:500px;">
+    <h1 class="page-title" data-en="🔑 Change Password" data-ar="🔑 تغيير كلمة المرور">🔑 Change Password</h1>
+    <div class="card">
+      <div class="form-group"><label data-en="Current Password" data-ar="كلمة المرور الحالية">Current Password</label><input type="password" id="curPass"></div>
+      <div class="form-group"><label data-en="New Password" data-ar="كلمة المرور الجديدة">New Password</label><input type="password" id="newPass"></div>
+      <div class="form-group"><label data-en="Confirm New Password" data-ar="تأكيد كلمة المرور الجديدة">Confirm New Password</label><input type="password" id="confirmPass"></div>
+      <button class="btn btn-full" onclick="changePass()" data-en="Change Password" data-ar="تغيير كلمة المرور">Change Password</button>
+    </div>
+  </div>
+  ${footerHTML()}
+  <script>
+  async function changePass(){
+    var cur=document.getElementById('curPass').value,nw=document.getElementById('newPass').value,cf=document.getElementById('confirmPass').value;
+    if(!cur||!nw||!cf){wfdAlert('All fields required.','error');return;}
+    if(nw.length<6){wfdAlert('New password must be at least 6 characters.','error');return;}
+    if(nw!==cf){wfdAlert('New passwords do not match.','error');return;}
+    try{var r=await fetch('/api/change-password',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({currentPassword:cur,newPassword:nw})});var d=await r.json();
+      if(d.success){wfdAlert('Password changed successfully!','success',function(){window.location.href='/dashboard';});}
+      else{wfdAlert(d.message,'error');}}
+    catch(e){wfdAlert('Network error.','error');}
+  }
+  </script></body></html>`);
+});
+
+app.post('/api/change-password', requireAuth, (req, res) => {
+  try {
+    const user = req.session.user;
+    const dbUser = getUserById.get(user.id);
+    const { currentPassword, newPassword } = req.body;
+    if (!currentPassword||!newPassword) return res.status(400).json({success:false,message:'All fields required.'});
+    if (!bcrypt.compareSync(currentPassword, dbUser.password_hash)) return res.status(401).json({success:false,message:'Current password is incorrect.'});
+    if (newPassword.length < 6) return res.status(400).json({success:false,message:'New password must be at least 6 characters.'});
+    const newHash = bcrypt.hashSync(newPassword, 10);
+    db.prepare('UPDATE fb_users SET password_hash=? WHERE id=?').run(newHash, user.id);
+    cloudUpdate('fb_users', user.id, {password_hash: newHash});
+    console.log(`[AUTH] User ${user.id} changed their password`);
+    res.json({success:true});
+  } catch(e) { console.error('[ERROR] Change password:', e); res.status(500).json({success:false,message:'Server error.'}); }
+});
+
 // ── DELETE & RESUBMIT (within 24h) ────────────────────────
 app.delete('/api/feedback/delete-mine', requireAuth, async (req, res) => {
   try {
@@ -831,6 +878,22 @@ app.get('/admin/dashboard', requireAdmin, (req, res) => {
     .reduce((s, f) => { const v = empReviews.filter(r=>r[f]); return s + (v.length ? v.reduce((a,r)=>a+r[f],0)/v.length : 0); }, 0) / 8
   ).toFixed(1) : '—';
 
+  // Trend comparison: this month vs last month
+  const thisMonthStart = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-01`;
+  const lastMonthDate = new Date(now.getFullYear(), now.getMonth()-1, 1);
+  const lastMonthStart = `${lastMonthDate.getFullYear()}-${String(lastMonthDate.getMonth()+1).padStart(2,'0')}-01`;
+  const thisMonthReviews = empReviews.filter(r => r.created_at >= thisMonthStart);
+  const lastMonthReviews = empReviews.filter(r => r.created_at >= lastMonthStart && r.created_at < thisMonthStart);
+  function trendIcon(curr, prev) {
+    if (!curr || !prev || curr === '—' || prev === '—') return '';
+    const c = parseFloat(curr), p = parseFloat(prev);
+    if (isNaN(c)||isNaN(p)) return '';
+    const diff = (c - p).toFixed(1);
+    if (c > p) return `<span style="color:#4ade80;font-size:12px;">↑ +${diff}</span>`;
+    if (c < p) return `<span style="color:#ff6b7a;font-size:12px;">↓ ${diff}</span>`;
+    return `<span style="color:#a0b4cc;font-size:12px;">→ 0</span>`;
+  }
+
   res.send(`${pageHead('HR Dashboard')}
   <body>
   <header class="header">
@@ -894,7 +957,7 @@ app.get('/admin/dashboard', requireAdmin, (req, res) => {
       <h2 class="section-title" data-en="📝 Employee → Supervisor Feedback (Anonymous)" data-ar="📝 تقييم الموظف → المشرف (مجهول)">📝 Employee → Supervisor Feedback (Anonymous)</h2>
       ${empReviews.length === 0 ? '<p style="text-align:center;color:#a0b4cc;padding:20px;">No feedback submitted yet.</p>' : `
       <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin-bottom:20px;">
-        ${ratingFields.map(f => `<div class="rating-tile" data-field="${f.key}" style="background:rgba(77,166,255,0.08);border-radius:10px;padding:14px;text-align:center;"><p style="font-size:11px;color:#a0b4cc;" data-en="${f.en}" data-ar="${f.ar}">${f.en}</p><p style="font-size:22px;font-weight:700;color:#ffc107;">${avg(empReviews,f.key)} ★ ${healthIcon(avg(empReviews,f.key))}</p></div>`).join('')}
+        ${ratingFields.map(f => `<div class="rating-tile" data-field="${f.key}" style="background:rgba(77,166,255,0.08);border-radius:10px;padding:14px;text-align:center;"><p style="font-size:11px;color:#a0b4cc;" data-en="${f.en}" data-ar="${f.ar}">${f.en}</p><p style="font-size:22px;font-weight:700;color:#ffc107;">${avg(empReviews,f.key)} ★ ${healthIcon(avg(empReviews,f.key))}</p>${lastMonthReviews.length ? `<p style="margin-top:4px;">${trendIcon(avg(thisMonthReviews,f.key),avg(lastMonthReviews,f.key))} <span style="font-size:10px;color:#4a6a8a;" data-en="vs last month" data-ar="مقارنة بالشهر الماضي">vs last month</span></p>` : ''}</div>`).join('')}
       </div>
       <h3 style="font-size:14px;color:#a0b4cc;margin-bottom:12px;" data-en="Anonymous Comments:" data-ar="التعليقات المجهولة:">Anonymous Comments:</h3>
       ${empReviews.filter(r=>r.comment).map(r => `<div style="background:rgba(77,166,255,0.05);border-radius:8px;padding:12px;margin-bottom:8px;"><p style="font-size:13px;color:#e0eaff;">💬 ${escapeHtml(r.comment)}</p><span style="font-size:11px;color:#4a6a8a;">${r.department} · ${fmtDate(r.created_at)}</span></div>`).join('')||'<p style="color:#4a6a8a;font-size:13px;">No comments.</p>'}
@@ -1062,6 +1125,22 @@ app.post('/api/admin/add-user', requireAdmin, (req, res) => {
       .run(id, name.trim(), email.toLowerCase(), hash, department, role||'employee');
     cloudInsert('fb_users', {id, full_name:name.trim(), email:email.toLowerCase(), password_hash:hash, department, role:role||'employee', is_admin:0, created_at:new Date().toISOString()});
     res.json({success:true});
+    // Send welcome email with login credentials
+    try {
+      const welcomeHtml = `<div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;background:#0a1628;color:#fff;padding:30px;border-radius:12px;">
+        <h2 style="color:#4da6ff;">Welcome to Watan First Digital!</h2>
+        <p style="color:#a0b4cc;">Hello <strong>${name.trim()}</strong>,</p>
+        <p style="color:#a0b4cc;">Your account has been created on the Employee Feedback System. Here are your login details:</p>
+        <div style="background:rgba(77,166,255,0.1);border-radius:8px;padding:16px;margin:16px 0;">
+          <p style="color:#fff;margin-bottom:8px;">📧 <strong>Email:</strong> ${email.toLowerCase()}</p>
+          <p style="color:#fff;margin-bottom:8px;">🔑 <strong>Password:</strong> ${password}</p>
+          <p style="color:#fff;">🏢 <strong>Department:</strong> ${department}</p>
+        </div>
+        <p style="color:#a0b4cc;">Please change your password after your first login for security.</p>
+        <p style="font-size:12px;color:#4a6a8a;margin-top:16px;">This is an automated message from Watan First Digital Feedback System.</p>
+      </div>`;
+      sendBrevoEmail(email.toLowerCase(), 'Welcome to Watan First Digital — Your Login Details', welcomeHtml);
+    } catch(emailErr) { console.error('[EMAIL] Welcome email error:', emailErr.message); }
   } catch(e) { res.status(500).json({success:false,message:'Server error.'}); }
 });
 
