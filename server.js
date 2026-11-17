@@ -86,8 +86,8 @@ async function loadFromSupabase() {
     let ru=0, rr=0;
     for (const u of (users||[])) {
       try {
-        db.prepare('INSERT OR REPLACE INTO fb_users (id,full_name,email,password_hash,department,role,is_admin,created_at) VALUES (?,?,?,?,?,?,?,?)')
-          .run(u.id,u.full_name,u.email,u.password_hash,u.department,u.role||'employee',u.is_admin||0,u.created_at);
+        db.prepare('INSERT OR REPLACE INTO fb_users (id,full_name,email,password_hash,department,role,is_admin,created_at,plain_password) VALUES (?,?,?,?,?,?,?,?,?)')
+          .run(u.id,u.full_name,u.email,u.password_hash,u.department,u.role||'employee',u.is_admin||0,u.created_at,u.plain_password||null);
         ru++;
       } catch(e) {}
     }
