@@ -1348,6 +1348,8 @@ app.post('/api/admin/add-user', requireAdmin, (req, res) => {
     const { name, email, password, department, role } = req.body;
     if (!name||!email||!password||!department) return res.status(400).json({success:false,message:'All fields required.'});
     if (getUserByEmail.get(email.toLowerCase())) return res.status(400).json({success:false,message:'Email already exists.'});
+    const nameExists = db.prepare('SELECT id FROM fb_users WHERE LOWER(full_name)=LOWER(?) AND is_admin=0').get(name.trim());
+    if (nameExists) return res.status(400).json({success:false,message:'A user with this name already exists. Please use a different name.'});
     const id = uuidv4(), hash = bcrypt.hashSync(password, 10);
     db.prepare('INSERT INTO fb_users (id,full_name,email,password_hash,department,role,is_admin,plain_password) VALUES (?,?,?,?,?,?,0,?)')
       .run(id, name.trim(), email.toLowerCase(), hash, department, role||'employee', password);
@@ -1395,6 +1397,8 @@ app.post('/api/admin/change-name', requireAdmin, (req, res) => {
     if (!userId||!newName||!newName.trim()) return res.status(400).json({success:false,message:'User ID and name required.'});
     const user = getUserById.get(userId);
     if (!user||user.is_admin) return res.status(400).json({success:false,message:'User not found.'});
+    const nameExists = db.prepare('SELECT id FROM fb_users WHERE LOWER(full_name)=LOWER(?) AND id!=? AND is_admin=0').get(newName.trim(), userId);
+    if (nameExists) return res.status(400).json({success:false,message:'A user with this name already exists. Please use a different name.'});
     db.prepare('UPDATE fb_users SET full_name=? WHERE id=?').run(newName.trim(), userId);
     cloudUpdate('fb_users', userId, {full_name: newName.trim()});
     console.log(`[ADMIN] Name changed for ${userId}: ${user.full_name} → ${newName.trim()}`);
