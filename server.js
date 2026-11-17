@@ -151,9 +151,9 @@ function requireAdmin(req, res, next) {
   res.redirect('/admin/login');
 }
 function escapeHtml(s) { return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
-// Simple eye toggle button HTML
+// Simple eye toggle button HTML — line-through = closed eye (hidden), no line = open eye (visible)
 function eyeBtn(inputId) {
-  return `<button type="button" onclick="var i=document.getElementById('${inputId}');i.type=i.type==='password'?'text':'password';" style="position:absolute;right:12px;top:50%;transform:translateY(-50%);background:none;border:none;color:#4da6ff;cursor:pointer;font-size:18px;">&#128065;</button>`;
+  return `<button type="button" onclick="var i=document.getElementById('${inputId}');if(i.type==='password'){i.type='text';this.style.textDecoration='none';this.style.opacity='1';}else{i.type='password';this.style.textDecoration='line-through';this.style.opacity='0.6';}" style="position:absolute;right:12px;top:50%;transform:translateY(-50%);background:none;border:none;color:#4da6ff;cursor:pointer;font-size:18px;text-decoration:line-through;opacity:0.6;">&#128065;</button>`;
 }
 function fmtDate(d) { try { const dt = new Date(d && (d.includes('Z')||d.includes('+')) ? d : (d||'')+'Z'); return isNaN(dt.getTime()) ? (d||'').slice(0,10)||'—' : dt.toLocaleDateString('en-US',{year:'numeric',month:'short'}); } catch(e) { return '—'; } }
 
@@ -1242,7 +1242,7 @@ app.get('/admin/manage', requireAdmin, (req, res) => {
             <div style="margin-top:4px;display:flex;align-items:center;gap:6px;">
               <span style="font-size:11px;color:#4a6a8a;">🔑</span>
               <span id="pw_${u.id}" style="font-size:12px;color:#4a6a8a;letter-spacing:2px;">••••••</span>
-              <button onclick="var s=document.getElementById('pw_${u.id}');if(s.textContent.indexOf('*')>=0||s.textContent.indexOf('•')>=0){s.textContent='${escapeHtml(u.plain_password||'N/A').replace(/'/g,"\\'")}';s.style.color='#4da6ff';s.style.letterSpacing='0';}else{s.textContent='\\u2022\\u2022\\u2022\\u2022\\u2022\\u2022';s.style.color='#4a6a8a';s.style.letterSpacing='2px';}" style="background:none;border:none;color:#4da6ff;cursor:pointer;font-size:14px;padding:0;">&#128065;</button>
+              <button onclick="var s=document.getElementById('pw_${u.id}');if(s.dataset.shown!=='1'){s.textContent='${escapeHtml(u.plain_password||'N/A').replace(/'/g,"\\'")}';s.style.color='#4da6ff';s.style.letterSpacing='0';s.dataset.shown='1';this.style.textDecoration='none';this.style.opacity='1';}else{s.textContent='\\u2022\\u2022\\u2022\\u2022\\u2022\\u2022';s.style.color='#4a6a8a';s.style.letterSpacing='2px';s.dataset.shown='0';this.style.textDecoration='line-through';this.style.opacity='0.6';}" style="background:none;border:none;color:#4da6ff;cursor:pointer;font-size:14px;padding:0;text-decoration:line-through;opacity:0.6;">&#128065;</button>
             </div>
           </div>
           <div style="display:flex;gap:8px;align-items:center;">
