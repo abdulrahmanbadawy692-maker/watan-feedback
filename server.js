@@ -833,9 +833,7 @@ app.delete('/api/feedback/delete-mine', requireAuth, async (req, res) => {
           console.log('[DELETE-EMAIL] Target supervisor:', sup ? sup.email : 'NOT FOUND');
           if (sup) await sendBrevoEmail(sup.email, 'Rating Removed — Watan First Digital', removedHtml(sup.full_name));
         } else {
-          const sups = db.prepare("SELECT * FROM fb_users WHERE department=? AND role='supervisor' AND is_admin=0").all(dept);
-          console.log('[DELETE-EMAIL] All dept supervisors:', sups.length);
-          for (const sup of sups) { await sendBrevoEmail(sup.email, 'Rating Removed — Watan First Digital', removedHtml(sup.full_name)); }
+          console.log('[DELETE-EMAIL] No specific target — skipping email');
         }
       } else if (reviewerRole === 'supervisor') {
         if (targetId) {
