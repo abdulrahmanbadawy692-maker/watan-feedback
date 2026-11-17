@@ -470,7 +470,7 @@ app.get('/dashboard', requireAuth, (req, res) => {
       </div>
       <div style="flex:1;min-width:150px;background:#132a45;border:1px solid rgba(77,166,255,0.2);border-radius:12px;padding:16px;text-align:center;">
         <p style="font-size:12px;color:#a0b4cc;" data-en="This Month" data-ar="هذا الشهر">This Month</p>
-        <p style="font-size:18px;font-weight:700;color:${existing?'#4ade80':'#ffc107'};">${existing?'Submitted ✅':'Not yet'}</p>
+        <p style="font-size:18px;font-weight:700;color:${ratedThisMonth.length>0?'#4ade80':'#ffc107'};">${ratedThisMonth.length>0?'Submitted ✅':'Not yet'}</p>
       </div>
     </div>
 
@@ -496,7 +496,7 @@ app.get('/dashboard', requireAuth, (req, res) => {
           <option value="" data-en="— Choose —" data-ar="— اختر —">— Choose —</option>
           ${unratedTargets.map(t => `<option value="${t.id}">${escapeHtml(t.full_name)} (${escapeHtml(t.department)})</option>`).join('')}
         </select>
-        ${ratedThisMonth.length > 0 ? `<p style="font-size:12px;color:#4ade80;margin-top:8px;">✅ <span data-en="Already rated this month: ${ratedIds.map(rid => { const u = getUserById.get(rid); return u ? u.full_name : ''; }).filter(Boolean).join(', ')}" data-ar="تم تقييمهم هذا الشهر: ${ratedIds.map(rid => { const u = getUserById.get(rid); return u ? u.full_name : ''; }).filter(Boolean).join('، ')}">Already rated this month: ${ratedIds.map(rid => { const u = getUserById.get(rid); return u ? u.full_name : ''; }).filter(Boolean).join(', ')}</span></p>` : ''}
+        ${ratedThisMonth.length > 0 ? `<p style="font-size:12px;color:#4ade80;margin-top:8px;">✅ <span data-en="Already rated this month: ${ratedIds.filter(Boolean).map(rid => { try { const u = getUserById.get(rid); return u ? u.full_name : ''; } catch(e) { return ''; } }).filter(Boolean).join(', ')}" data-ar="تم تقييمهم هذا الشهر: ${ratedIds.filter(Boolean).map(rid => { try { const u = getUserById.get(rid); return u ? u.full_name : ''; } catch(e) { return ''; } }).filter(Boolean).join('، ')}">Already rated this month: ${ratedIds.filter(Boolean).map(rid => { try { const u = getUserById.get(rid); return u ? u.full_name : ''; } catch(e) { return ''; } }).filter(Boolean).join(', ')}</span></p>` : ''}
       </div>
 
       <!-- Rating form (hidden until selection) -->
