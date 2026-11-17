@@ -760,7 +760,7 @@ app.delete('/api/feedback/delete-mine', requireAuth, async (req, res) => {
     const user = req.session.user;
     const now = new Date();
     const monthStart = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-01`;
-    const existing = db.prepare('SELECT id,created_at FROM fb_reviews WHERE reviewer_id=? AND created_at>=? ORDER BY created_at DESC').get(user.id, monthStart);
+    const existing = db.prepare('SELECT * FROM fb_reviews WHERE reviewer_id=? AND created_at>=? ORDER BY created_at DESC').get(user.id, monthStart);
     if (!existing) return res.status(400).json({success:false,message:'No feedback to delete.'});
     const ca2 = existing.created_at || '';
     const submittedAt = new Date(ca2.includes('Z') || ca2.includes('+') ? ca2 : ca2 + 'Z');
@@ -772,6 +772,38 @@ app.delete('/api/feedback/delete-mine', requireAuth, async (req, res) => {
     try { await supabase.from('fb_reviews').delete().eq('id', existing.id); } catch(e) {}
     console.log(`[FEEDBACK] User ${user.id} deleted their feedback (within 24h window)`);
     res.json({success:true});
+
+    // Email the rated person that their rating was removed
+    try {
+      const dbUser = getUserById.get(user.id);
+      if (existing.reviewer_role === 'employee' && existing.target_id) {
+        // Employee deleted their supervisor rating
+        const sup = getUserById.get(existing.target_id);
+        if (sup) {
+          const emailHtml = `<div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;background:#0a1628;color:#fff;padding:30px;border-radius:12px;">
+            <h2 style="color:#4da6ff;">Rating Removed</h2>
+            <p style="color:#a0b4cc;">Hello <strong>${sup.full_name}</strong>,</p>
+            <p style="color:#a0b4cc;">An anonymous rating about you in the <strong>${existing.department}</strong> department has been removed from the system.</p>
+            <p style="color:#a0b4cc;font-size:13px;">The employee may submit a new rating. Check your dashboard for the latest results.</p>
+            <p style="font-size:12px;color:#4a6a8a;">Watan First Digital Feedback System</p>
+          </div>`;
+          sendBrevoEmail(sup.email, 'Rating Removed — Watan First Digital', emailHtml);
+        }
+      } else if (existing.reviewer_role === 'supervisor' && existing.target_id) {
+        // Supervisor deleted their employee rating
+        const emp = getUserById.get(existing.target_id);
+        if (emp) {
+          const emailHtml = `<div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;background:#0a1628;color:#fff;padding:30px;border-radius:12px;">
+            <h2 style="color:#4da6ff;">Rating Removed</h2>
+            <p style="color:#a0b4cc;">Hello <strong>${emp.full_name}</strong>,</p>
+            <p style="color:#a0b4cc;">A rating about you from your supervisor has been removed from the system.</p>
+            <p style="color:#a0b4cc;font-size:13px;">Your supervisor may submit a new rating. Log in to see your latest ratings.</p>
+            <p style="font-size:12px;color:#4a6a8a;">Watan First Digital Feedback System</p>
+          </div>`;
+          sendBrevoEmail(emp.email, 'Rating Removed — Watan First Digital', emailHtml);
+        }
+      }
+    } catch(emailErr) { console.error('[EMAIL] Delete notify error:', emailErr.message); }
   } catch(e) { console.error('[ERROR] Delete feedback:', e); res.status(500).json({success:false,message:'Server error.'}); }
 });
 
