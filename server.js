@@ -1144,6 +1144,7 @@ app.get('/admin/manage', requireAdmin, (req, res) => {
           <div style="display:flex;gap:8px;align-items:center;">
             <span class="badge ${u.role==='supervisor'?'badge-sup':'badge-emp'}">${u.role}</span>
             <span class="badge" style="background:rgba(255,255,255,0.05);color:#a0b4cc;">${escapeHtml(u.department)}</span>
+            <button onclick="editDept('${u.id}','${escapeHtml(u.full_name)}','${escapeHtml(u.department)}')" style="padding:4px 10px;background:rgba(40,167,69,0.15);color:#4ade80;border:1px solid rgba(40,167,69,0.3);border-radius:6px;cursor:pointer;font-size:11px;font-weight:600;font-family:inherit;" data-en="✏️ Dept" data-ar="✏️ القسم">✏️ Dept</button>
             <button onclick="resetPass('${u.id}','${escapeHtml(u.full_name)}')" style="padding:4px 10px;background:rgba(77,166,255,0.15);color:#4da6ff;border:1px solid rgba(77,166,255,0.3);border-radius:6px;cursor:pointer;font-size:11px;font-weight:600;font-family:inherit;" data-en="🔑 Reset" data-ar="🔑 تغيير">🔑 Reset</button>
             <button onclick="deleteUser('${u.id}','${escapeHtml(u.full_name)}')" style="padding:4px 10px;background:rgba(220,53,69,0.15);color:#ff6b7a;border:1px solid rgba(220,53,69,0.3);border-radius:6px;cursor:pointer;font-size:11px;font-weight:600;font-family:inherit;">🗑️</button>
           </div>
@@ -1163,6 +1164,20 @@ app.get('/admin/manage', requireAdmin, (req, res) => {
   async function deleteUser(id,name){if(!confirm('Delete user "'+name+'"? This cannot be undone.'))return;
     try{var r=await fetch('/api/admin/delete-user/'+id,{method:'DELETE'});var d=await r.json();
       if(d.success){wfdAlert('User deleted.','success',function(){location.reload();});}
+      else{wfdAlert(d.message,'error');}}
+    catch(x){wfdAlert('Network error.','error');}
+  }
+  async function editDept(id,name,currentDept){
+    var depts=${JSON.stringify(departments)};
+    var opts=depts.map(function(d,i){return (i+1)+'. '+d;}).join('\\n');
+    var pick=prompt('Change department for "'+name+'"\\nCurrent: '+currentDept+'\\n\\nType the number:\\n'+opts);
+    if(!pick)return;
+    var idx=parseInt(pick)-1;
+    if(isNaN(idx)||idx<0||idx>=depts.length){wfdAlert('Invalid selection.','error');return;}
+    var newDept=depts[idx];
+    if(newDept===currentDept){wfdAlert('Same department selected.','error');return;}
+    try{var r=await fetch('/api/admin/change-department',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({userId:id,department:newDept})});var d=await r.json();
+      if(d.success){wfdAlert('Department changed to '+newDept+'!','success',function(){location.reload();});}
       else{wfdAlert(d.message,'error');}}
     catch(x){wfdAlert('Network error.','error');}
   }
@@ -1231,6 +1246,20 @@ app.post('/api/admin/reset-password', requireAdmin, (req, res) => {
     db.prepare('UPDATE fb_users SET password_hash=?, plain_password=? WHERE id=?').run(newHash, newPassword, userId);
     cloudUpdate('fb_users', userId, {password_hash: newHash, plain_password: newPassword});
     console.log(`[ADMIN] Password reset for user ${userId}`);
+    res.json({success:true});
+  } catch(e) { res.status(500).json({success:false,message:'Server error.'}); }
+});
+
+// Change department API
+app.post('/api/admin/change-department', requireAdmin, (req, res) => {
+  try {
+    const { userId, department } = req.body;
+    if (!userId||!department) return res.status(400).json({success:false,message:'User ID and department required.'});
+    const user = getUserById.get(userId);
+    if (!user||user.is_admin) return res.status(400).json({success:false,message:'User not found.'});
+    db.prepare('UPDATE fb_users SET department=? WHERE id=?').run(department, userId);
+    cloudUpdate('fb_users', userId, {department});
+    console.log(`[ADMIN] Department changed for ${userId}: ${user.department} → ${department}`);
     res.json({success:true});
   } catch(e) { res.status(500).json({success:false,message:'Server error.'}); }
 });
