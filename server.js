@@ -151,6 +151,8 @@ function requireAdmin(req, res, next) {
   res.redirect('/admin/login');
 }
 function escapeHtml(s) { return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+const eyeOpenSVG = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>`;
+const eyeClosedSVG = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.94 17.94A10.07 10.07 0 0112 20c-7 0-11-8-11-8a18.45 18.45 0 015.06-5.94M9.9 4.24A9.12 9.12 0 0112 4c7 0 11 8 11 8a18.5 18.5 0 01-2.16 3.19m-6.72-1.07a3 3 0 11-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>`;
 function fmtDate(d) { try { const dt = new Date(d && (d.includes('Z')||d.includes('+')) ? d : (d||'')+'Z'); return isNaN(dt.getTime()) ? (d||'').slice(0,10)||'—' : dt.toLocaleDateString('en-US',{year:'numeric',month:'short'}); } catch(e) { return '—'; } }
 
 // ── Shared HTML Helpers ─────────────────────────────────────
@@ -349,7 +351,7 @@ app.get('/', (req, res) => {
       <div class="form-group"><label data-en="Email" data-ar="البريد">Email</label><input type="email" id="email"></div>
       <div class="form-group"><label data-en="Password" data-ar="كلمة المرور">Password</label>
         <div style="position:relative;"><input type="password" id="pass" style="padding-right:44px;">
-        <button type="button" onclick="var i=document.getElementById('pass');i.type=i.type==='password'?'text':'password';" style="position:absolute;right:12px;top:50%;transform:translateY(-50%);background:none;border:none;color:#4da6ff;cursor:pointer;font-size:18px;">👁</button></div>
+        <button type="button" onclick="var i=document.getElementById('pass');if(i.type==='password'){i.type='text';this.innerHTML='${eyeClosedSVG.replace(/'/g,"\\'")}'}else{i.type='password';this.innerHTML='${eyeOpenSVG.replace(/'/g,"\\'")}';}" style="position:absolute;right:12px;top:50%;transform:translateY(-50%);background:none;border:none;color:#4da6ff;cursor:pointer;display:flex;align-items:center;">${eyeOpenSVG}</button></div>
       </div>
       <button class="btn btn-full" onclick="doLogin()" data-en="Login" data-ar="دخول">Login</button>
       <p style="text-align:center;margin-top:16px;font-size:13px;color:#a0b4cc;" data-en="Contact HR to get your login credentials" data-ar="تواصل مع الموارد البشرية للحصول على بيانات الدخول">Contact HR to get your login credentials</p>
@@ -675,9 +677,9 @@ app.get('/change-password', requireAuth, (req, res) => {
   <div class="container" style="max-width:500px;">
     <h1 class="page-title" data-en="🔑 Change Password" data-ar="🔑 تغيير كلمة المرور">🔑 Change Password</h1>
     <div class="card">
-      <div class="form-group"><label data-en="Current Password" data-ar="كلمة المرور الحالية">Current Password</label><div style="position:relative;"><input type="password" id="curPass" style="padding-right:44px;"><button type="button" onclick="var i=document.getElementById('curPass');i.type=i.type==='password'?'text':'password';" style="position:absolute;right:12px;top:50%;transform:translateY(-50%);background:none;border:none;color:#4da6ff;cursor:pointer;font-size:18px;">👁</button></div></div>
-      <div class="form-group"><label data-en="New Password" data-ar="كلمة المرور الجديدة">New Password</label><div style="position:relative;"><input type="password" id="newPass" style="padding-right:44px;"><button type="button" onclick="var i=document.getElementById('newPass');i.type=i.type==='password'?'text':'password';" style="position:absolute;right:12px;top:50%;transform:translateY(-50%);background:none;border:none;color:#4da6ff;cursor:pointer;font-size:18px;">👁</button></div></div>
-      <div class="form-group"><label data-en="Confirm New Password" data-ar="تأكيد كلمة المرور الجديدة">Confirm New Password</label><div style="position:relative;"><input type="password" id="confirmPass" style="padding-right:44px;"><button type="button" onclick="var i=document.getElementById('confirmPass');i.type=i.type==='password'?'text':'password';" style="position:absolute;right:12px;top:50%;transform:translateY(-50%);background:none;border:none;color:#4da6ff;cursor:pointer;font-size:18px;">👁</button></div></div>
+      <div class="form-group"><label data-en="Current Password" data-ar="كلمة المرور الحالية">Current Password</label><div style="position:relative;"><input type="password" id="curPass" style="padding-right:44px;"><button type="button" onclick="var i=document.getElementById('curPass');if(i.type==='password'){i.type='text';this.innerHTML='${eyeClosedSVG.replace(/'/g,"\\'")}'}else{i.type='password';this.innerHTML='${eyeOpenSVG.replace(/'/g,"\\'")}';}" style="position:absolute;right:12px;top:50%;transform:translateY(-50%);background:none;border:none;color:#4da6ff;cursor:pointer;display:flex;align-items:center;">${eyeOpenSVG}</button></div></div>
+      <div class="form-group"><label data-en="New Password" data-ar="كلمة المرور الجديدة">New Password</label><div style="position:relative;"><input type="password" id="newPass" style="padding-right:44px;"><button type="button" onclick="var i=document.getElementById('newPass');if(i.type==='password'){i.type='text';this.innerHTML='${eyeClosedSVG.replace(/'/g,"\\'")}'}else{i.type='password';this.innerHTML='${eyeOpenSVG.replace(/'/g,"\\'")}';}" style="position:absolute;right:12px;top:50%;transform:translateY(-50%);background:none;border:none;color:#4da6ff;cursor:pointer;display:flex;align-items:center;">${eyeOpenSVG}</button></div></div>
+      <div class="form-group"><label data-en="Confirm New Password" data-ar="تأكيد كلمة المرور الجديدة">Confirm New Password</label><div style="position:relative;"><input type="password" id="confirmPass" style="padding-right:44px;"><button type="button" onclick="var i=document.getElementById('confirmPass');if(i.type==='password'){i.type='text';this.innerHTML='${eyeClosedSVG.replace(/'/g,"\\'")}'}else{i.type='password';this.innerHTML='${eyeOpenSVG.replace(/'/g,"\\'")}';}" style="position:absolute;right:12px;top:50%;transform:translateY(-50%);background:none;border:none;color:#4da6ff;cursor:pointer;display:flex;align-items:center;">${eyeOpenSVG}</button></div></div>
       <button class="btn btn-full" onclick="changePass()" data-en="Change Password" data-ar="تغيير كلمة المرور">Change Password</button>
     </div>
   </div>
@@ -860,7 +862,7 @@ app.get('/admin/login', (req, res) => {
     <div class="card">
       <div class="auth-error" id="aErr"></div>
       <div class="form-group"><label>Email</label><input type="email" id="aEmail" value="admin@watanfirst.com"></div>
-      <div class="form-group"><label>Password</label><div style="position:relative;"><input type="password" id="aPass" style="padding-right:44px;"><button type="button" onclick="var i=document.getElementById('aPass');i.type=i.type==='password'?'text':'password';" style="position:absolute;right:12px;top:50%;transform:translateY(-50%);background:none;border:none;color:#4da6ff;cursor:pointer;font-size:18px;">👁</button></div></div>
+      <div class="form-group"><label>Password</label><div style="position:relative;"><input type="password" id="aPass" style="padding-right:44px;"><button type="button" onclick="var i=document.getElementById('aPass');if(i.type==='password'){i.type='text';this.innerHTML='${eyeClosedSVG.replace(/'/g,"\\'")}'}else{i.type='password';this.innerHTML='${eyeOpenSVG.replace(/'/g,"\\'")}';}" style="position:absolute;right:12px;top:50%;transform:translateY(-50%);background:none;border:none;color:#4da6ff;cursor:pointer;display:flex;align-items:center;">${eyeOpenSVG}</button></div></div>
       <button class="btn btn-full" onclick="adminLogin()" data-en="Login" data-ar="دخول">Login</button>
     </div>
   </div></div>
@@ -1138,7 +1140,7 @@ app.get('/admin/manage', requireAdmin, (req, res) => {
             <div style="margin-top:4px;display:flex;align-items:center;gap:6px;">
               <span style="font-size:11px;color:#4a6a8a;">🔑</span>
               <span id="pw_${u.id}" style="font-size:12px;color:#4a6a8a;letter-spacing:2px;">••••••</span>
-              <button onclick="var s=document.getElementById('pw_${u.id}');if(s.textContent==='••••••'){s.textContent='${escapeHtml(u.plain_password||'N/A')}';s.style.color='#4da6ff';s.style.letterSpacing='0';this.textContent='🙈';}else{s.textContent='••••••';s.style.color='#4a6a8a';s.style.letterSpacing='2px';this.textContent='👁';}" style="background:none;border:none;cursor:pointer;font-size:14px;padding:0;">👁</button>
+              <button onclick="var s=document.getElementById('pw_${u.id}');if(s.textContent==='••••••'){s.textContent='${escapeHtml(u.plain_password||'N/A')}';s.style.color='#4da6ff';s.style.letterSpacing='0';this.innerHTML='${eyeClosedSVG.replace(/'/g,"\\'")}';}else{s.textContent='••••••';s.style.color='#4a6a8a';s.style.letterSpacing='2px';this.innerHTML='${eyeOpenSVG.replace(/'/g,"\\'")}'}" style="background:none;border:none;cursor:pointer;color:#4da6ff;display:inline-flex;align-items:center;padding:0;">${eyeOpenSVG}</button>
             </div>
           </div>
           <div style="display:flex;gap:8px;align-items:center;">
