@@ -407,21 +407,19 @@ app.get('/dashboard', requireAuth, (req, res) => {
     rateTargets = db.prepare('SELECT * FROM fb_users WHERE department=? AND role=\'supervisor\' AND is_admin=0').all(dbUser.department);
   }
 
-  // Check which targets already rated this month
+  // Check which targets already rated this month (with 24h delete window per rating)
   const ratedThisMonth = db.prepare('SELECT target_id,id,created_at FROM fb_reviews WHERE reviewer_id=? AND created_at>=?').all(user.id, monthStart);
   const ratedIds = ratedThisMonth.map(r => r.target_id);
   const unratedTargets = rateTargets.filter(t => !ratedIds.includes(t.id));
 
-  // For delete & resubmit: check last submission within 24h
-  let canDelete = false;
-  let lastSubmission = null;
-  if (ratedThisMonth.length > 0) {
-    lastSubmission = ratedThisMonth[0];
-    const ca = lastSubmission.created_at || '';
+  // Build rated list with delete eligibility per person
+  const ratedWithInfo = ratedThisMonth.filter(r => r.target_id).map(r => {
+    const target = getUserById.get(r.target_id);
+    const ca = r.created_at || '';
     const submittedAt = new Date(ca.includes('Z') || ca.includes('+') ? ca : ca + 'Z');
     const hoursSince = isNaN(submittedAt.getTime()) ? 999 : (now.getTime() - submittedAt.getTime()) / (1000 * 60 * 60);
-    canDelete = hoursSince <= 24;
-  }
+    return { reviewId: r.id, targetId: r.target_id, name: target ? target.full_name : 'Unknown', canDelete: hoursSince <= 24 };
+  });
 
   // Get ratings about this user (from supervisors if employee, from employees if supervisor)
   let myRatings = [];
@@ -469,7 +467,7 @@ app.get('/dashboard', requireAuth, (req, res) => {
     <div class="card">
       <h2 class="section-title" data-en="${isSuper?'📝 Rate Your Team Members':'📝 Submit Anonymous Feedback'}" data-ar="${isSuper?'📝 قيّم أعضاء فريقك':'📝 أرسل تقييمك المجهول'}">${isSuper?'📝 Rate Your Team Members':'📝 Submit Anonymous Feedback'}</h2>
 
-      ${unratedTargets.length === 0 && ratedThisMonth.length > 0 ? `<div style="text-align:center;padding:20px;"><p style="color:#4ade80;font-size:16px;font-weight:600;" data-en="✅ You have rated all ${isSuper?'employees':'supervisors'} this month" data-ar="✅ لقد قيّمت جميع ${isSuper?'الموظفين':'المشرفين'} هذا الشهر">✅ You have rated all ${isSuper?'employees':'supervisors'} this month</p><p style="color:#a0b4cc;font-size:13px;margin-top:8px;" data-en="You can submit again next month" data-ar="يمكنك الإرسال مرة أخرى الشهر القادم">You can submit again next month</p>${canDelete ? `<button onclick="deleteAndResubmit()" style="margin-top:16px;padding:10px 24px;background:rgba(220,53,69,0.15);color:#ff6b7a;border:1px solid rgba(220,53,69,0.3);border-radius:8px;cursor:pointer;font-size:13px;font-weight:600;font-family:inherit;" data-en="🗑️ Delete Last & Resubmit (within 24h)" data-ar="🗑️ حذف الأخير وإعادة الإرسال (خلال ٢٤ ساعة)">🗑️ Delete Last & Resubmit (within 24h)</button>` : ''}</div>` : `
+      ${unratedTargets.length === 0 && ratedThisMonth.length > 0 ? `<div style="text-align:center;padding:20px;"><p style="color:#4ade80;font-size:16px;font-weight:600;" data-en="✅ You have rated all ${isSuper?'employees':'supervisors'} this month" data-ar="✅ لقد قيّمت جميع ${isSuper?'الموظفين':'المشرفين'} هذا الشهر">✅ You have rated all ${isSuper?'employees':'supervisors'} this month</p><p style="color:#a0b4cc;font-size:13px;margin-top:8px;" data-en="You can submit again next month. Delete a rating below to re-rate." data-ar="يمكنك الإرسال مرة أخرى الشهر القادم. احذف تقييم أدناه لإعادة التقييم.">You can submit again next month. Delete a rating below to re-rate.</p><div style="display:flex;flex-wrap:wrap;gap:6px;justify-content:center;margin-top:12px;">${ratedWithInfo.map(r => `<div style="display:inline-flex;align-items:center;gap:6px;background:rgba(74,222,128,0.1);border:1px solid rgba(74,222,128,0.3);border-radius:20px;padding:4px 12px;"><span style="font-size:12px;color:#4ade80;">✅ ${escapeHtml(r.name)}</span>${r.canDelete ? `<button onclick="deleteRating('${r.reviewId}','${escapeHtml(r.name)}')" style="background:none;border:none;color:#ff6b7a;cursor:pointer;font-size:12px;padding:0 2px;" title="Delete rating">🗑️</button>` : ''}</div>`).join('')}</div></div>` : `
 
       ${rateTargets.length === 0 ? '<p style="color:#a0b4cc;text-align:center;padding:20px;" data-en="No one to rate in your department." data-ar="لا يوجد أحد لتقييمه في قسمك.">No one to rate in your department.</p>' : `
 
@@ -480,7 +478,7 @@ app.get('/dashboard', requireAuth, (req, res) => {
           <option value="" data-en="— Choose —" data-ar="— اختر —">— Choose —</option>
           ${unratedTargets.map(t => `<option value="${t.id}">${escapeHtml(t.full_name)} (${escapeHtml(t.department)})</option>`).join('')}
         </select>
-        ${ratedThisMonth.length > 0 ? `<p style="font-size:12px;color:#4ade80;margin-top:8px;">✅ <span data-en="Already rated this month: ${ratedIds.filter(Boolean).map(rid => { try { const u = getUserById.get(rid); return u ? u.full_name : ''; } catch(e) { return ''; } }).filter(Boolean).join(', ')}" data-ar="تم تقييمهم هذا الشهر: ${ratedIds.filter(Boolean).map(rid => { try { const u = getUserById.get(rid); return u ? u.full_name : ''; } catch(e) { return ''; } }).filter(Boolean).join('، ')}">Already rated this month: ${ratedIds.filter(Boolean).map(rid => { try { const u = getUserById.get(rid); return u ? u.full_name : ''; } catch(e) { return ''; } }).filter(Boolean).join(', ')}</span></p>${canDelete ? `<button onclick="deleteAndResubmit()" style="margin-top:8px;padding:6px 16px;background:rgba(220,53,69,0.15);color:#ff6b7a;border:1px solid rgba(220,53,69,0.3);border-radius:6px;cursor:pointer;font-size:11px;font-weight:600;font-family:inherit;" data-en="🗑️ Delete Last Rating (24h)" data-ar="🗑️ حذف آخر تقييم (٢٤ ساعة)">🗑️ Delete Last Rating (24h)</button>` : ''}` : ''}
+        ${ratedWithInfo.length > 0 ? `<div style="margin-top:10px;"><p style="font-size:12px;color:#4ade80;margin-bottom:6px;" data-en="Already rated this month:" data-ar="تم تقييمهم هذا الشهر:">Already rated this month:</p><div style="display:flex;flex-wrap:wrap;gap:6px;">${ratedWithInfo.map(r => `<div style="display:inline-flex;align-items:center;gap:6px;background:rgba(74,222,128,0.1);border:1px solid rgba(74,222,128,0.3);border-radius:20px;padding:4px 12px;"><span style="font-size:12px;color:#4ade80;">✅ ${escapeHtml(r.name)}</span>${r.canDelete ? `<button onclick="deleteRating('${r.reviewId}','${escapeHtml(r.name)}')" style="background:none;border:none;color:#ff6b7a;cursor:pointer;font-size:12px;padding:0 2px;" title="Delete rating">🗑️</button>` : ''}</div>`).join('')}</div></div>` : ''}
       </div>
 
       <!-- Rating form (hidden until selection) -->
@@ -689,10 +687,10 @@ app.get('/dashboard', requireAuth, (req, res) => {
       else{wfdAlert(d.message,'error');}}
     catch(e){wfdAlert('Network error.','error');}
   }
-  async function deleteAndResubmit(){
-    if(!confirm('Delete your current feedback and submit a new one?'))return;
-    try{var r=await fetch('/api/feedback/delete-mine',{method:'DELETE'});var d=await r.json();
-      if(d.success){wfdAlert('Feedback deleted. You can now submit again.','success',function(){location.reload();});}
+  async function deleteRating(reviewId,name){
+    if(!confirm('Delete your rating for "'+name+'"?'))return;
+    try{var r=await fetch('/api/feedback/delete-rating/'+reviewId,{method:'DELETE'});var d=await r.json();
+      if(d.success){wfdAlert('Rating for '+name+' deleted. You can rate them again.','success',function(){location.reload();});}
       else{wfdAlert(d.message,'error');}}
     catch(e){wfdAlert('Network error.','error');}
   }
@@ -802,13 +800,12 @@ app.post('/api/change-password', requireAuth, (req, res) => {
   } catch(e) { console.error('[ERROR] Change password:', e); res.status(500).json({success:false,message:'Server error.'}); }
 });
 
-// ── DELETE & RESUBMIT (within 24h) ────────────────────────
-app.delete('/api/feedback/delete-mine', requireAuth, async (req, res) => {
+// ── DELETE SPECIFIC RATING (within 24h) ───────────────────
+app.delete('/api/feedback/delete-rating/:reviewId', requireAuth, async (req, res) => {
   try {
     const user = req.session.user;
     const now = new Date();
-    const monthStart = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-01`;
-    const existing = db.prepare('SELECT * FROM fb_reviews WHERE reviewer_id=? AND created_at>=? ORDER BY created_at DESC').get(user.id, monthStart);
+    const existing = db.prepare('SELECT * FROM fb_reviews WHERE id=? AND reviewer_id=?').get(req.params.reviewId, user.id);
     if (!existing) return res.status(400).json({success:false,message:'No feedback to delete.'});
     const ca2 = existing.created_at || '';
     const submittedAt = new Date(ca2.includes('Z') || ca2.includes('+') ? ca2 : ca2 + 'Z');
