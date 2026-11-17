@@ -1270,6 +1270,7 @@ app.get('/admin/manage', requireAdmin, (req, res) => {
           <div style="display:flex;gap:8px;align-items:center;">
             <span class="badge ${u.role==='supervisor'?'badge-sup':'badge-emp'}">${u.role}</span>
             <span class="badge" style="background:rgba(255,255,255,0.05);color:#a0b4cc;">${escapeHtml(u.department)}</span>
+            <button onclick="editName('${u.id}','${escapeHtml(u.full_name)}')" style="padding:4px 10px;background:rgba(255,193,7,0.15);color:#ffc107;border:1px solid rgba(255,193,7,0.3);border-radius:6px;cursor:pointer;font-size:11px;font-weight:600;font-family:inherit;" data-en="✏️ Name" data-ar="✏️ الاسم">✏️ Name</button>
             <button onclick="editDept('${u.id}','${escapeHtml(u.full_name)}','${escapeHtml(u.department)}')" style="padding:4px 10px;background:rgba(40,167,69,0.15);color:#4ade80;border:1px solid rgba(40,167,69,0.3);border-radius:6px;cursor:pointer;font-size:11px;font-weight:600;font-family:inherit;" data-en="✏️ Dept" data-ar="✏️ القسم">✏️ Dept</button>
             <button onclick="resetPass('${u.id}','${escapeHtml(u.full_name)}')" style="padding:4px 10px;background:rgba(77,166,255,0.15);color:#4da6ff;border:1px solid rgba(77,166,255,0.3);border-radius:6px;cursor:pointer;font-size:11px;font-weight:600;font-family:inherit;" data-en="🔑 Reset" data-ar="🔑 تغيير">🔑 Reset</button>
             <button onclick="deleteUser('${u.id}','${escapeHtml(u.full_name)}')" style="padding:4px 10px;background:rgba(220,53,69,0.15);color:#ff6b7a;border:1px solid rgba(220,53,69,0.3);border-radius:6px;cursor:pointer;font-size:11px;font-weight:600;font-family:inherit;">🗑️</button>
@@ -1292,6 +1293,15 @@ app.get('/admin/manage', requireAdmin, (req, res) => {
   async function deleteUser(id,name){if(!confirm('Delete user "'+name+'"? This cannot be undone.'))return;
     try{var r=await fetch('/api/admin/delete-user/'+id,{method:'DELETE'});var d=await r.json();
       if(d.success){wfdAlert('User deleted.','success',function(){location.reload();});}
+      else{wfdAlert(d.message,'error');}}
+    catch(x){wfdAlert('Network error.','error');}
+  }
+  async function editName(id,currentName){
+    var nn=prompt('Enter new name for "'+currentName+'":',currentName);
+    if(!nn||!nn.trim()){return;}
+    if(nn.trim()===currentName){wfdAlert('Same name.','error');return;}
+    try{var r=await fetch('/api/admin/change-name',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({userId:id,newName:nn.trim()})});var d=await r.json();
+      if(d.success){wfdAlert('Name changed!','success',function(){location.reload();});}
       else{wfdAlert(d.message,'error');}}
     catch(x){wfdAlert('Network error.','error');}
   }
@@ -1374,6 +1384,20 @@ app.post('/api/admin/reset-password', requireAdmin, (req, res) => {
     db.prepare('UPDATE fb_users SET password_hash=?, plain_password=? WHERE id=?').run(newHash, newPassword, userId);
     cloudUpdate('fb_users', userId, {password_hash: newHash, plain_password: newPassword});
     console.log(`[ADMIN] Password reset for user ${userId}`);
+    res.json({success:true});
+  } catch(e) { res.status(500).json({success:false,message:'Server error.'}); }
+});
+
+// Change name API
+app.post('/api/admin/change-name', requireAdmin, (req, res) => {
+  try {
+    const { userId, newName } = req.body;
+    if (!userId||!newName||!newName.trim()) return res.status(400).json({success:false,message:'User ID and name required.'});
+    const user = getUserById.get(userId);
+    if (!user||user.is_admin) return res.status(400).json({success:false,message:'User not found.'});
+    db.prepare('UPDATE fb_users SET full_name=? WHERE id=?').run(newName.trim(), userId);
+    cloudUpdate('fb_users', userId, {full_name: newName.trim()});
+    console.log(`[ADMIN] Name changed for ${userId}: ${user.full_name} → ${newName.trim()}`);
     res.json({success:true});
   } catch(e) { res.status(500).json({success:false,message:'Server error.'}); }
 });
