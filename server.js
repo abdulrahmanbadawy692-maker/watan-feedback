@@ -151,8 +151,29 @@ function requireAdmin(req, res, next) {
   res.redirect('/admin/login');
 }
 function escapeHtml(s) { return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
-const eyeOpenSVG = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>`;
-const eyeClosedSVG = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.94 17.94A10.07 10.07 0 0112 20c-7 0-11-8-11-8a18.45 18.45 0 015.06-5.94M9.9 4.24A9.12 9.12 0 0112 4c7 0 11 8 11 8a18.5 18.5 0 01-2.16 3.19m-6.72-1.07a3 3 0 11-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>`;
+// Eye toggle script (injected into pages with password fields)
+function eyeToggleScript() {
+  return `<script>
+  function togglePassVis(inputId,btn){var i=document.getElementById(inputId);if(!i)return;
+    if(i.type==='password'){i.type='text';btn.classList.add('eye-open');}
+    else{i.type='password';btn.classList.remove('eye-open');}}
+  function togglePwShow(userId,btn,pw){var s=document.getElementById('pw_'+userId);if(!s)return;
+    if(s.dataset.shown==='1'){s.textContent='••••••';s.style.color='#4a6a8a';s.style.letterSpacing='2px';s.dataset.shown='0';btn.classList.remove('eye-open');}
+    else{s.textContent=pw;s.style.color='#4da6ff';s.style.letterSpacing='0';s.dataset.shown='1';btn.classList.add('eye-open');}}
+  </script>
+  <style>
+  .eye-btn{position:absolute;right:12px;top:50%;transform:translateY(-50%);background:none;border:none;color:#4da6ff;cursor:pointer;width:24px;height:24px;display:flex;align-items:center;justify-content:center;}
+  .eye-btn::before{content:'';display:block;width:18px;height:12px;border:2px solid currentColor;border-radius:50%;position:relative;}
+  .eye-btn::after{content:'';position:absolute;width:8px;height:8px;background:currentColor;border-radius:50%;top:50%;left:50%;transform:translate(-50%,-50%);}
+  .eye-btn.eye-open::before{opacity:0.5;}
+  .eye-btn.eye-open::after{opacity:0.5;}
+  .eye-inline{background:none;border:none;color:#4da6ff;cursor:pointer;width:20px;height:20px;display:inline-flex;align-items:center;justify-content:center;position:relative;vertical-align:middle;}
+  .eye-inline::before{content:'';display:block;width:16px;height:10px;border:2px solid currentColor;border-radius:50%;}
+  .eye-inline::after{content:'';position:absolute;width:6px;height:6px;background:currentColor;border-radius:50%;top:50%;left:50%;transform:translate(-50%,-50%);}
+  .eye-inline.eye-open::before{opacity:0.5;}
+  .eye-inline.eye-open::after{opacity:0.5;}
+  </style>`;
+}
 function fmtDate(d) { try { const dt = new Date(d && (d.includes('Z')||d.includes('+')) ? d : (d||'')+'Z'); return isNaN(dt.getTime()) ? (d||'').slice(0,10)||'—' : dt.toLocaleDateString('en-US',{year:'numeric',month:'short'}); } catch(e) { return '—'; } }
 
 // ── Shared HTML Helpers ─────────────────────────────────────
@@ -351,13 +372,14 @@ app.get('/', (req, res) => {
       <div class="form-group"><label data-en="Email" data-ar="البريد">Email</label><input type="email" id="email"></div>
       <div class="form-group"><label data-en="Password" data-ar="كلمة المرور">Password</label>
         <div style="position:relative;"><input type="password" id="pass" style="padding-right:44px;">
-        <button type="button" onclick="var i=document.getElementById('pass');if(i.type==='password'){i.type='text';this.innerHTML='${eyeClosedSVG.replace(/'/g,"\\'")}'}else{i.type='password';this.innerHTML='${eyeOpenSVG.replace(/'/g,"\\'")}';}" style="position:absolute;right:12px;top:50%;transform:translateY(-50%);background:none;border:none;color:#4da6ff;cursor:pointer;display:flex;align-items:center;">${eyeOpenSVG}</button></div>
+        <button type="button" class="eye-btn" onclick="togglePassVis('pass',this)"></button></div>
       </div>
       <button class="btn btn-full" onclick="doLogin()" data-en="Login" data-ar="دخول">Login</button>
       <p style="text-align:center;margin-top:16px;font-size:13px;color:#a0b4cc;" data-en="Contact HR to get your login credentials" data-ar="تواصل مع الموارد البشرية للحصول على بيانات الدخول">Contact HR to get your login credentials</p>
     </div>
   </div></div>
   ${accessibilityHTML()}${accessibilityJS()}
+  ${eyeToggleScript()}
   <script>
   document.getElementById('pass').addEventListener('keypress',function(e){if(e.key==='Enter')doLogin();});
   async function doLogin(){var e=document.getElementById('email').value.trim(),p=document.getElementById('pass').value,err=document.getElementById('err');
@@ -677,13 +699,14 @@ app.get('/change-password', requireAuth, (req, res) => {
   <div class="container" style="max-width:500px;">
     <h1 class="page-title" data-en="🔑 Change Password" data-ar="🔑 تغيير كلمة المرور">🔑 Change Password</h1>
     <div class="card">
-      <div class="form-group"><label data-en="Current Password" data-ar="كلمة المرور الحالية">Current Password</label><div style="position:relative;"><input type="password" id="curPass" style="padding-right:44px;"><button type="button" onclick="var i=document.getElementById('curPass');if(i.type==='password'){i.type='text';this.innerHTML='${eyeClosedSVG.replace(/'/g,"\\'")}'}else{i.type='password';this.innerHTML='${eyeOpenSVG.replace(/'/g,"\\'")}';}" style="position:absolute;right:12px;top:50%;transform:translateY(-50%);background:none;border:none;color:#4da6ff;cursor:pointer;display:flex;align-items:center;">${eyeOpenSVG}</button></div></div>
-      <div class="form-group"><label data-en="New Password" data-ar="كلمة المرور الجديدة">New Password</label><div style="position:relative;"><input type="password" id="newPass" style="padding-right:44px;"><button type="button" onclick="var i=document.getElementById('newPass');if(i.type==='password'){i.type='text';this.innerHTML='${eyeClosedSVG.replace(/'/g,"\\'")}'}else{i.type='password';this.innerHTML='${eyeOpenSVG.replace(/'/g,"\\'")}';}" style="position:absolute;right:12px;top:50%;transform:translateY(-50%);background:none;border:none;color:#4da6ff;cursor:pointer;display:flex;align-items:center;">${eyeOpenSVG}</button></div></div>
-      <div class="form-group"><label data-en="Confirm New Password" data-ar="تأكيد كلمة المرور الجديدة">Confirm New Password</label><div style="position:relative;"><input type="password" id="confirmPass" style="padding-right:44px;"><button type="button" onclick="var i=document.getElementById('confirmPass');if(i.type==='password'){i.type='text';this.innerHTML='${eyeClosedSVG.replace(/'/g,"\\'")}'}else{i.type='password';this.innerHTML='${eyeOpenSVG.replace(/'/g,"\\'")}';}" style="position:absolute;right:12px;top:50%;transform:translateY(-50%);background:none;border:none;color:#4da6ff;cursor:pointer;display:flex;align-items:center;">${eyeOpenSVG}</button></div></div>
+      <div class="form-group"><label data-en="Current Password" data-ar="كلمة المرور الحالية">Current Password</label><div style="position:relative;"><input type="password" id="curPass" style="padding-right:44px;"><button type="button" class="eye-btn" onclick="togglePassVis('curPass',this)"></button></div></div>
+      <div class="form-group"><label data-en="New Password" data-ar="كلمة المرور الجديدة">New Password</label><div style="position:relative;"><input type="password" id="newPass" style="padding-right:44px;"><button type="button" class="eye-btn" onclick="togglePassVis('newPass',this)"></button></div></div>
+      <div class="form-group"><label data-en="Confirm New Password" data-ar="تأكيد كلمة المرور الجديدة">Confirm New Password</label><div style="position:relative;"><input type="password" id="confirmPass" style="padding-right:44px;"><button type="button" class="eye-btn" onclick="togglePassVis('confirmPass',this)"></button></div></div>
       <button class="btn btn-full" onclick="changePass()" data-en="Change Password" data-ar="تغيير كلمة المرور">Change Password</button>
     </div>
   </div>
   ${footerHTML()}
+  ${eyeToggleScript()}
   <script>
   async function changePass(){
     var cur=document.getElementById('curPass').value,nw=document.getElementById('newPass').value,cf=document.getElementById('confirmPass').value;
@@ -862,11 +885,12 @@ app.get('/admin/login', (req, res) => {
     <div class="card">
       <div class="auth-error" id="aErr"></div>
       <div class="form-group"><label>Email</label><input type="email" id="aEmail" value="admin@watanfirst.com"></div>
-      <div class="form-group"><label>Password</label><div style="position:relative;"><input type="password" id="aPass" style="padding-right:44px;"><button type="button" onclick="var i=document.getElementById('aPass');if(i.type==='password'){i.type='text';this.innerHTML='${eyeClosedSVG.replace(/'/g,"\\'")}'}else{i.type='password';this.innerHTML='${eyeOpenSVG.replace(/'/g,"\\'")}';}" style="position:absolute;right:12px;top:50%;transform:translateY(-50%);background:none;border:none;color:#4da6ff;cursor:pointer;display:flex;align-items:center;">${eyeOpenSVG}</button></div></div>
+      <div class="form-group"><label>Password</label><div style="position:relative;"><input type="password" id="aPass" style="padding-right:44px;"><button type="button" class="eye-btn" onclick="togglePassVis('aPass',this)"></button></div></div>
       <button class="btn btn-full" onclick="adminLogin()" data-en="Login" data-ar="دخول">Login</button>
     </div>
   </div></div>
   ${accessibilityHTML()}${accessibilityJS()}
+  ${eyeToggleScript()}
   <script>
   document.getElementById('aPass').addEventListener('keypress',function(e){if(e.key==='Enter')adminLogin();});
   async function adminLogin(){var e=document.getElementById('aEmail').value,p=document.getElementById('aPass').value,err=document.getElementById('aErr');
@@ -1140,7 +1164,7 @@ app.get('/admin/manage', requireAdmin, (req, res) => {
             <div style="margin-top:4px;display:flex;align-items:center;gap:6px;">
               <span style="font-size:11px;color:#4a6a8a;">🔑</span>
               <span id="pw_${u.id}" style="font-size:12px;color:#4a6a8a;letter-spacing:2px;">••••••</span>
-              <button onclick="var s=document.getElementById('pw_${u.id}');if(s.textContent==='••••••'){s.textContent='${escapeHtml(u.plain_password||'N/A')}';s.style.color='#4da6ff';s.style.letterSpacing='0';this.innerHTML='${eyeClosedSVG.replace(/'/g,"\\'")}';}else{s.textContent='••••••';s.style.color='#4a6a8a';s.style.letterSpacing='2px';this.innerHTML='${eyeOpenSVG.replace(/'/g,"\\'")}'}" style="background:none;border:none;cursor:pointer;color:#4da6ff;display:inline-flex;align-items:center;padding:0;">${eyeOpenSVG}</button>
+              <button class="eye-inline" onclick="togglePwShow('${u.id}',this,'${escapeHtml(u.plain_password||'N/A').replace(/'/g,"\\'")}')"></button>
             </div>
           </div>
           <div style="display:flex;gap:8px;align-items:center;">
@@ -1154,6 +1178,7 @@ app.get('/admin/manage', requireAdmin, (req, res) => {
     </div>
   </div>
   ${footerHTML()}
+  ${eyeToggleScript()}
   <script>
   function wfdAlert(msg,type,cb){var ic=type==='success'?'✅':type==='error'?'❌':'ℹ️';var cl=type==='success'?'#28a745':type==='error'?'#dc3545':'#4da6ff';var t=document.createElement('div');t.style.cssText='position:fixed;top:20px;left:50%;transform:translateX(-50%);z-index:99999;background:#132a45;border:1px solid '+cl+';border-radius:12px;padding:14px 24px;display:flex;align-items:center;gap:12px;box-shadow:0 8px 30px rgba(0,0,0,0.4);max-width:500px;width:90%;';t.innerHTML='<span style="font-size:24px;flex-shrink:0;">'+ic+'</span><p style="font-size:14px;color:#fff;line-height:1.4;flex:1;">'+msg+'</p><button style="padding:6px 16px;background:'+cl+';color:#fff;border:none;border-radius:6px;font-size:12px;font-weight:600;cursor:pointer;font-family:inherit;flex-shrink:0;">OK</button>';t.querySelector('button').onclick=function(){t.remove();if(cb)cb();};document.body.appendChild(t);if(!cb)setTimeout(function(){if(t.parentNode)t.remove();},4000);}
   async function addUser(){var n=document.getElementById('aName').value.trim(),e=document.getElementById('aEmailAdd').value.trim(),p=document.getElementById('aPassAdd').value,d=document.getElementById('aDept').value,r=document.getElementById('aRole').value;
