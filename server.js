@@ -151,9 +151,8 @@ function requireAdmin(req, res, next) {
   res.redirect('/admin/login');
 }
 function escapeHtml(s) { return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
-// Simple eye toggle button HTML — line-through = closed eye (hidden), no line = open eye (visible)
 function eyeBtn(inputId) {
-  return `<button type="button" onclick="var i=document.getElementById('${inputId}');if(i.type==='password'){i.type='text';this.style.textDecoration='none';this.style.opacity='1';}else{i.type='password';this.style.textDecoration='line-through';this.style.opacity='0.6';}" style="position:absolute;right:12px;top:50%;transform:translateY(-50%);background:none;border:none;color:#4da6ff;cursor:pointer;font-size:18px;text-decoration:line-through;opacity:0.6;">&#128065;</button>`;
+  return `<button type="button" onclick="toggleEye('${inputId}',this)" style="position:absolute;right:12px;top:50%;transform:translateY(-50%);background:none;border:none;color:#4da6ff;cursor:pointer;display:flex;align-items:center;"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"></path><path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"></path><line x1="1" y1="1" x2="23" y2="23"></line></svg></button>`;
 }
 function fmtDate(d) { try { const dt = new Date(d && (d.includes('Z')||d.includes('+')) ? d : (d||'')+'Z'); return isNaN(dt.getTime()) ? (d||'').slice(0,10)||'—' : dt.toLocaleDateString('en-US',{year:'numeric',month:'short'}); } catch(e) { return '—'; } }
 
@@ -239,6 +238,10 @@ function pageHead(title) {
   <title>${title} — Watan First Digital</title><link rel="icon" href="/logo.png" type="image/png">
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
   <script>try{localStorage.removeItem('wfd_a11y_hc');}catch(e){}
+  var _eyeOpen='<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>';
+  var _eyeClosed='<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"></path><path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"></path><line x1="1" y1="1" x2="23" y2="23"></line></svg>';
+  function toggleEye(inputId,btnEl){var i=document.getElementById(inputId);if(!i)return;if(i.type==='password'){i.type='text';btnEl.innerHTML=_eyeOpen;}else{i.type='password';btnEl.innerHTML=_eyeClosed;}}
+  function togglePwEye(uid,btnEl,pw){var s=document.getElementById('pw_'+uid);if(!s)return;if(s.dataset.shown!=='1'){s.textContent=pw;s.style.color='#4da6ff';s.style.letterSpacing='0';s.dataset.shown='1';btnEl.innerHTML=_eyeOpen;}else{s.textContent='\\u2022\\u2022\\u2022\\u2022\\u2022\\u2022';s.style.color='#4a6a8a';s.style.letterSpacing='2px';s.dataset.shown='0';btnEl.innerHTML=_eyeClosed;}}
   function wfdAlert(msg,type,cb){var ic=type==='success'?'✅':type==='error'?'❌':'ℹ️';var cl=type==='success'?'#28a745':type==='error'?'#dc3545':'#4da6ff';
   var t=document.createElement('div');t.style.cssText='position:fixed;top:20px;left:50%;transform:translateX(-50%);z-index:99999;background:#132a45;border:1px solid '+cl+';border-radius:12px;padding:14px 24px;display:flex;align-items:center;gap:12px;box-shadow:0 8px 30px rgba(0,0,0,0.4);max-width:500px;width:90%;animation:wfdSlideDown .3s;';
   t.innerHTML='<span style="font-size:24px;flex-shrink:0;">'+ic+'</span><p style="font-size:14px;color:#fff;line-height:1.4;flex:1;">'+msg+'</p><button style="padding:6px 16px;background:'+cl+';color:#fff;border:none;border-radius:6px;font-size:12px;font-weight:600;cursor:pointer;font-family:inherit;flex-shrink:0;">OK</button>';
@@ -1242,7 +1245,7 @@ app.get('/admin/manage', requireAdmin, (req, res) => {
             <div style="margin-top:4px;display:flex;align-items:center;gap:6px;">
               <span style="font-size:11px;color:#4a6a8a;">🔑</span>
               <span id="pw_${u.id}" style="font-size:12px;color:#4a6a8a;letter-spacing:2px;">••••••</span>
-              <button onclick="var s=document.getElementById('pw_${u.id}');if(s.dataset.shown!=='1'){s.textContent='${escapeHtml(u.plain_password||'N/A').replace(/'/g,"\\'")}';s.style.color='#4da6ff';s.style.letterSpacing='0';s.dataset.shown='1';this.style.textDecoration='none';this.style.opacity='1';}else{s.textContent='\\u2022\\u2022\\u2022\\u2022\\u2022\\u2022';s.style.color='#4a6a8a';s.style.letterSpacing='2px';s.dataset.shown='0';this.style.textDecoration='line-through';this.style.opacity='0.6';}" style="background:none;border:none;color:#4da6ff;cursor:pointer;font-size:14px;padding:0;text-decoration:line-through;opacity:0.6;">&#128065;</button>
+              <button onclick="togglePwEye('${u.id}',this,'${escapeHtml(u.plain_password||'N/A').replace(/'/g,"\\'")}')" style="background:none;border:none;color:#4da6ff;cursor:pointer;padding:0;display:inline-flex;align-items:center;vertical-align:middle;"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"></path><path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"></path><line x1="1" y1="1" x2="23" y2="23"></line></svg></button>
             </div>
           </div>
           <div style="display:flex;gap:8px;align-items:center;">
