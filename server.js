@@ -1144,6 +1144,7 @@ app.get('/admin/manage', requireAdmin, (req, res) => {
           <div style="display:flex;gap:8px;align-items:center;">
             <span class="badge ${u.role==='supervisor'?'badge-sup':'badge-emp'}">${u.role}</span>
             <span class="badge" style="background:rgba(255,255,255,0.05);color:#a0b4cc;">${escapeHtml(u.department)}</span>
+            <button onclick="resetPass('${u.id}','${escapeHtml(u.full_name)}')" style="padding:4px 10px;background:rgba(77,166,255,0.15);color:#4da6ff;border:1px solid rgba(77,166,255,0.3);border-radius:6px;cursor:pointer;font-size:11px;font-weight:600;font-family:inherit;" data-en="🔑 Reset" data-ar="🔑 تغيير">🔑 Reset</button>
             <button onclick="deleteUser('${u.id}','${escapeHtml(u.full_name)}')" style="padding:4px 10px;background:rgba(220,53,69,0.15);color:#ff6b7a;border:1px solid rgba(220,53,69,0.3);border-radius:6px;cursor:pointer;font-size:11px;font-weight:600;font-family:inherit;">🗑️</button>
           </div>
         </div>`).join('')}
@@ -1162,6 +1163,13 @@ app.get('/admin/manage', requireAdmin, (req, res) => {
   async function deleteUser(id,name){if(!confirm('Delete user "'+name+'"? This cannot be undone.'))return;
     try{var r=await fetch('/api/admin/delete-user/'+id,{method:'DELETE'});var d=await r.json();
       if(d.success){wfdAlert('User deleted.','success',function(){location.reload();});}
+      else{wfdAlert(d.message,'error');}}
+    catch(x){wfdAlert('Network error.','error');}
+  }
+  async function resetPass(id,name){var np=prompt('Enter new password for "'+name+'":');
+    if(!np||np.length<6){if(np!==null)wfdAlert('Password must be at least 6 characters.','error');return;}
+    try{var r=await fetch('/api/admin/reset-password',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({userId:id,newPassword:np})});var d=await r.json();
+      if(d.success){wfdAlert('Password reset! New password: '+np,'success',function(){location.reload();});}
       else{wfdAlert(d.message,'error');}}
     catch(x){wfdAlert('Network error.','error');}
   }
@@ -1208,6 +1216,22 @@ app.post('/api/admin/add-user', requireAdmin, (req, res) => {
       </div>`;
       sendBrevoEmail(email.toLowerCase(), 'Welcome to Watan First Digital — Your Login Details', welcomeHtml);
     } catch(emailErr) { console.error('[EMAIL] Welcome email error:', emailErr.message); }
+  } catch(e) { res.status(500).json({success:false,message:'Server error.'}); }
+});
+
+// Reset password API (HR sets new password for any user)
+app.post('/api/admin/reset-password', requireAdmin, (req, res) => {
+  try {
+    const { userId, newPassword } = req.body;
+    if (!userId||!newPassword) return res.status(400).json({success:false,message:'User ID and new password required.'});
+    if (newPassword.length < 6) return res.status(400).json({success:false,message:'Password must be at least 6 characters.'});
+    const user = getUserById.get(userId);
+    if (!user||user.is_admin) return res.status(400).json({success:false,message:'User not found.'});
+    const newHash = bcrypt.hashSync(newPassword, 10);
+    db.prepare('UPDATE fb_users SET password_hash=?, plain_password=? WHERE id=?').run(newHash, newPassword, userId);
+    cloudUpdate('fb_users', userId, {password_hash: newHash, plain_password: newPassword});
+    console.log(`[ADMIN] Password reset for user ${userId}`);
+    res.json({success:true});
   } catch(e) { res.status(500).json({success:false,message:'Server error.'}); }
 });
 
