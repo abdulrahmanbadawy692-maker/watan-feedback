@@ -162,16 +162,16 @@ function eyeToggleScript() {
     else{s.textContent=pw;s.style.color='#4da6ff';s.style.letterSpacing='0';s.dataset.shown='1';btn.classList.add('eye-open');}}
   </script>
   <style>
-  .eye-btn{position:absolute;right:12px;top:50%;transform:translateY(-50%);background:none;border:none;color:#4da6ff;cursor:pointer;width:24px;height:24px;display:flex;align-items:center;justify-content:center;}
-  .eye-btn::before{content:'';display:block;width:18px;height:12px;border:2px solid currentColor;border-radius:50%;position:relative;}
-  .eye-btn::after{content:'';position:absolute;width:8px;height:8px;background:currentColor;border-radius:50%;top:50%;left:50%;transform:translate(-50%,-50%);}
-  .eye-btn.eye-open::before{opacity:0.5;}
-  .eye-btn.eye-open::after{opacity:0.5;}
-  .eye-inline{background:none;border:none;color:#4da6ff;cursor:pointer;width:20px;height:20px;display:inline-flex;align-items:center;justify-content:center;position:relative;vertical-align:middle;}
-  .eye-inline::before{content:'';display:block;width:16px;height:10px;border:2px solid currentColor;border-radius:50%;}
-  .eye-inline::after{content:'';position:absolute;width:6px;height:6px;background:currentColor;border-radius:50%;top:50%;left:50%;transform:translate(-50%,-50%);}
-  .eye-inline.eye-open::before{opacity:0.5;}
-  .eye-inline.eye-open::after{opacity:0.5;}
+  .eye-btn{position:absolute;right:12px;top:50%;transform:translateY(-50%);background:none;border:none;color:#4da6ff;cursor:pointer;width:20px;height:20px;display:flex;align-items:center;justify-content:center;overflow:visible;}
+  .eye-btn::before{content:'';display:block;width:14px;height:9px;border:1.5px solid currentColor;border-radius:50%;position:relative;}
+  .eye-btn::after{content:'';position:absolute;width:5px;height:5px;background:currentColor;border-radius:50%;top:50%;left:50%;transform:translate(-50%,-50%);}
+  .eye-btn .eye-slash{position:absolute;width:20px;height:1.5px;background:#4da6ff;transform:rotate(-45deg);top:50%;left:0;}
+  .eye-btn.eye-open .eye-slash{display:none;}
+  .eye-inline{background:none;border:none;color:#4da6ff;cursor:pointer;width:16px;height:16px;display:inline-flex;align-items:center;justify-content:center;position:relative;vertical-align:middle;overflow:visible;}
+  .eye-inline::before{content:'';display:block;width:12px;height:8px;border:1.5px solid currentColor;border-radius:50%;}
+  .eye-inline::after{content:'';position:absolute;width:4px;height:4px;background:currentColor;border-radius:50%;top:50%;left:50%;transform:translate(-50%,-50%);}
+  .eye-inline .eye-slash{position:absolute;width:16px;height:1.5px;background:#4da6ff;transform:rotate(-45deg);top:50%;left:0;}
+  .eye-inline.eye-open .eye-slash{display:none;}
   </style>`;
 }
 function fmtDate(d) { try { const dt = new Date(d && (d.includes('Z')||d.includes('+')) ? d : (d||'')+'Z'); return isNaN(dt.getTime()) ? (d||'').slice(0,10)||'—' : dt.toLocaleDateString('en-US',{year:'numeric',month:'short'}); } catch(e) { return '—'; } }
@@ -372,7 +372,7 @@ app.get('/', (req, res) => {
       <div class="form-group"><label data-en="Email" data-ar="البريد">Email</label><input type="email" id="email"></div>
       <div class="form-group"><label data-en="Password" data-ar="كلمة المرور">Password</label>
         <div style="position:relative;"><input type="password" id="pass" style="padding-right:44px;">
-        <button type="button" class="eye-btn" onclick="togglePassVis('pass',this)"></button></div>
+        <button type="button" class="eye-btn" onclick="togglePassVis('pass',this)"><span class="eye-slash"></span></button></div>
       </div>
       <button class="btn btn-full" onclick="doLogin()" data-en="Login" data-ar="دخول">Login</button>
       <p style="text-align:center;margin-top:16px;font-size:13px;color:#a0b4cc;" data-en="Contact HR to get your login credentials" data-ar="تواصل مع الموارد البشرية للحصول على بيانات الدخول">Contact HR to get your login credentials</p>
@@ -699,9 +699,9 @@ app.get('/change-password', requireAuth, (req, res) => {
   <div class="container" style="max-width:500px;">
     <h1 class="page-title" data-en="🔑 Change Password" data-ar="🔑 تغيير كلمة المرور">🔑 Change Password</h1>
     <div class="card">
-      <div class="form-group"><label data-en="Current Password" data-ar="كلمة المرور الحالية">Current Password</label><div style="position:relative;"><input type="password" id="curPass" style="padding-right:44px;"><button type="button" class="eye-btn" onclick="togglePassVis('curPass',this)"></button></div></div>
-      <div class="form-group"><label data-en="New Password" data-ar="كلمة المرور الجديدة">New Password</label><div style="position:relative;"><input type="password" id="newPass" style="padding-right:44px;"><button type="button" class="eye-btn" onclick="togglePassVis('newPass',this)"></button></div></div>
-      <div class="form-group"><label data-en="Confirm New Password" data-ar="تأكيد كلمة المرور الجديدة">Confirm New Password</label><div style="position:relative;"><input type="password" id="confirmPass" style="padding-right:44px;"><button type="button" class="eye-btn" onclick="togglePassVis('confirmPass',this)"></button></div></div>
+      <div class="form-group"><label data-en="Current Password" data-ar="كلمة المرور الحالية">Current Password</label><div style="position:relative;"><input type="password" id="curPass" style="padding-right:44px;"><button type="button" class="eye-btn" onclick="togglePassVis('curPass',this)"><span class="eye-slash"></span></button></div></div>
+      <div class="form-group"><label data-en="New Password" data-ar="كلمة المرور الجديدة">New Password</label><div style="position:relative;"><input type="password" id="newPass" style="padding-right:44px;"><button type="button" class="eye-btn" onclick="togglePassVis('newPass',this)"><span class="eye-slash"></span></button></div></div>
+      <div class="form-group"><label data-en="Confirm New Password" data-ar="تأكيد كلمة المرور الجديدة">Confirm New Password</label><div style="position:relative;"><input type="password" id="confirmPass" style="padding-right:44px;"><button type="button" class="eye-btn" onclick="togglePassVis('confirmPass',this)"><span class="eye-slash"></span></button></div></div>
       <button class="btn btn-full" onclick="changePass()" data-en="Change Password" data-ar="تغيير كلمة المرور">Change Password</button>
     </div>
   </div>
@@ -885,7 +885,7 @@ app.get('/admin/login', (req, res) => {
     <div class="card">
       <div class="auth-error" id="aErr"></div>
       <div class="form-group"><label>Email</label><input type="email" id="aEmail" value="admin@watanfirst.com"></div>
-      <div class="form-group"><label>Password</label><div style="position:relative;"><input type="password" id="aPass" style="padding-right:44px;"><button type="button" class="eye-btn" onclick="togglePassVis('aPass',this)"></button></div></div>
+      <div class="form-group"><label>Password</label><div style="position:relative;"><input type="password" id="aPass" style="padding-right:44px;"><button type="button" class="eye-btn" onclick="togglePassVis('aPass',this)"><span class="eye-slash"></span></button></div></div>
       <button class="btn btn-full" onclick="adminLogin()" data-en="Login" data-ar="دخول">Login</button>
     </div>
   </div></div>
@@ -1164,7 +1164,7 @@ app.get('/admin/manage', requireAdmin, (req, res) => {
             <div style="margin-top:4px;display:flex;align-items:center;gap:6px;">
               <span style="font-size:11px;color:#4a6a8a;">🔑</span>
               <span id="pw_${u.id}" style="font-size:12px;color:#4a6a8a;letter-spacing:2px;">••••••</span>
-              <button class="eye-inline" onclick="togglePwShow('${u.id}',this,'${escapeHtml(u.plain_password||'N/A').replace(/'/g,"\\'")}')"></button>
+              <button class="eye-inline" onclick="togglePwShow('${u.id}',this,'${escapeHtml(u.plain_password||'N/A').replace(/'/g,"\\'")}')"><span class="eye-slash"></span></button>
             </div>
           </div>
           <div style="display:flex;gap:8px;align-items:center;">
