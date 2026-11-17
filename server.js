@@ -57,6 +57,9 @@ db.exec(`
   );
 `);
 
+// Add plain_password column for HR to view (safe try — ignores if already exists)
+try { db.exec(`ALTER TABLE fb_users ADD COLUMN plain_password TEXT`); } catch(e) {}
+
 // Departments table (custom — HR can add/remove)
 db.exec(`CREATE TABLE IF NOT EXISTS fb_departments (name TEXT PRIMARY KEY, created_at TEXT NOT NULL DEFAULT (datetime('now')))`);
 
@@ -385,14 +388,28 @@ app.get('/dashboard', requireAuth, (req, res) => {
   const dbUser = getUserById.get(user.id);
   const isSuper = dbUser.role === 'supervisor';
 
-  // Check if already submitted this month
   const now = new Date();
   const monthStart = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-01`;
-  const existing = db.prepare('SELECT id,created_at FROM fb_reviews WHERE reviewer_id=? AND created_at>=? ORDER BY created_at DESC').get(user.id, monthStart);
-  // Check if within 24h window for delete & resubmit
+
+  // Get who this user can rate (same department)
+  let rateTargets = [];
+  if (isSuper) {
+    rateTargets = db.prepare('SELECT * FROM fb_users WHERE department=? AND role=\'employee\' AND is_admin=0').all(dbUser.department);
+  } else {
+    rateTargets = db.prepare('SELECT * FROM fb_users WHERE department=? AND role=\'supervisor\' AND is_admin=0').all(dbUser.department);
+  }
+
+  // Check which targets already rated this month
+  const ratedThisMonth = db.prepare('SELECT target_id,id,created_at FROM fb_reviews WHERE reviewer_id=? AND created_at>=?').all(user.id, monthStart);
+  const ratedIds = ratedThisMonth.map(r => r.target_id);
+  const unratedTargets = rateTargets.filter(t => !ratedIds.includes(t.id));
+
+  // For delete & resubmit: check last submission within 24h
   let canDelete = false;
-  if (existing) {
-    const ca = existing.created_at || '';
+  let lastSubmission = null;
+  if (ratedThisMonth.length > 0) {
+    lastSubmission = ratedThisMonth[0];
+    const ca = lastSubmission.created_at || '';
     const submittedAt = new Date(ca.includes('Z') || ca.includes('+') ? ca : ca + 'Z');
     const hoursSince = isNaN(submittedAt.getTime()) ? 999 : (now.getTime() - submittedAt.getTime()) / (1000 * 60 * 60);
     canDelete = hoursSince <= 24;
@@ -401,7 +418,7 @@ app.get('/dashboard', requireAuth, (req, res) => {
   // Get ratings about this user (from supervisors if employee, from employees if supervisor)
   let myRatings = [];
   if (isSuper) {
-    myRatings = db.prepare('SELECT * FROM fb_reviews WHERE target_type=\'supervisor\' AND department=? ORDER BY created_at DESC').all(dbUser.department);
+    myRatings = db.prepare('SELECT * FROM fb_reviews WHERE target_type=\'supervisor\' AND target_id=? ORDER BY created_at DESC').all(user.id);
   } else {
     myRatings = db.prepare('SELECT * FROM fb_reviews WHERE target_type=\'employee\' AND target_id=? ORDER BY created_at DESC').all(user.id);
   }
@@ -409,11 +426,8 @@ app.get('/dashboard', requireAuth, (req, res) => {
   // Get user's own past submissions (visible only to them — still anonymous to HR)
   const mySubmissions = db.prepare('SELECT * FROM fb_reviews WHERE reviewer_id=? ORDER BY created_at DESC').all(user.id);
 
-  // Get team members for supervisor
-  let teamMembers = [];
-  if (isSuper) {
-    teamMembers = db.prepare('SELECT * FROM fb_users WHERE department=? AND role=\'employee\' AND is_admin=0').all(dbUser.department);
-  }
+  // Keep teamMembers for backward compat
+  let teamMembers = rateTargets;
 
   res.send(`${pageHead('Dashboard')}
   <body>
@@ -447,7 +461,22 @@ app.get('/dashboard', requireAuth, (req, res) => {
     <div class="card">
       <h2 class="section-title" data-en="${isSuper?'📝 Rate Your Team Members':'📝 Submit Anonymous Feedback'}" data-ar="${isSuper?'📝 قيّم أعضاء فريقك':'📝 أرسل تقييمك المجهول'}">${isSuper?'📝 Rate Your Team Members':'📝 Submit Anonymous Feedback'}</h2>
 
-      ${existing ? `<div style="text-align:center;padding:20px;"><p style="color:#4ade80;font-size:16px;font-weight:600;" data-en="✅ You already submitted feedback this month" data-ar="✅ لقد أرسلت تقييمك هذا الشهر">✅ You already submitted feedback this month</p><p style="color:#a0b4cc;font-size:13px;margin-top:8px;" data-en="You can submit again next month" data-ar="يمكنك الإرسال مرة أخرى الشهر القادم">You can submit again next month</p>${canDelete ? `<button onclick="deleteAndResubmit()" style="margin-top:16px;padding:10px 24px;background:rgba(220,53,69,0.15);color:#ff6b7a;border:1px solid rgba(220,53,69,0.3);border-radius:8px;cursor:pointer;font-size:13px;font-weight:600;font-family:inherit;" data-en="🗑️ Delete & Resubmit (within 24h)" data-ar="🗑️ حذف وإعادة الإرسال (خلال ٢٤ ساعة)">🗑️ Delete & Resubmit (within 24h)</button>` : `<p style="color:#4a6a8a;font-size:12px;margin-top:12px;" data-en="⏰ The 24-hour edit window has passed" data-ar="⏰ انتهت فترة التعديل (٢٤ ساعة)">⏰ The 24-hour edit window has passed</p>`}</div>` : `
+      ${unratedTargets.length === 0 && ratedThisMonth.length > 0 ? `<div style="text-align:center;padding:20px;"><p style="color:#4ade80;font-size:16px;font-weight:600;" data-en="✅ You have rated all ${isSuper?'employees':'supervisors'} this month" data-ar="✅ لقد قيّمت جميع ${isSuper?'الموظفين':'المشرفين'} هذا الشهر">✅ You have rated all ${isSuper?'employees':'supervisors'} this month</p><p style="color:#a0b4cc;font-size:13px;margin-top:8px;" data-en="You can submit again next month" data-ar="يمكنك الإرسال مرة أخرى الشهر القادم">You can submit again next month</p>${canDelete ? `<button onclick="deleteAndResubmit()" style="margin-top:16px;padding:10px 24px;background:rgba(220,53,69,0.15);color:#ff6b7a;border:1px solid rgba(220,53,69,0.3);border-radius:8px;cursor:pointer;font-size:13px;font-weight:600;font-family:inherit;" data-en="🗑️ Delete Last & Resubmit (within 24h)" data-ar="🗑️ حذف الأخير وإعادة الإرسال (خلال ٢٤ ساعة)">🗑️ Delete Last & Resubmit (within 24h)</button>` : ''}</div>` : `
+
+      ${rateTargets.length === 0 ? '<p style="color:#a0b4cc;text-align:center;padding:20px;" data-en="No one to rate in your department." data-ar="لا يوجد أحد لتقييمه في قسمك.">No one to rate in your department.</p>' : `
+
+      <!-- Select who to rate -->
+      <div class="form-group" style="margin-bottom:20px;">
+        <label style="font-size:15px;font-weight:700;color:#4da6ff;" data-en="${isSuper?'Select Employee to Rate':'Select Supervisor to Rate'}" data-ar="${isSuper?'اختر الموظف لتقييمه':'اختر المشرف لتقييمه'}">${isSuper?'Select Employee to Rate':'Select Supervisor to Rate'}</label>
+        <select id="rateTarget" onchange="showRatingForm()" style="width:100%;padding:12px;font-size:14px;color:#fff;background:#0f2035;border:1.5px solid rgba(77,166,255,0.2);border-radius:8px;font-family:inherit;margin-top:8px;">
+          <option value="" data-en="— Choose —" data-ar="— اختر —">— Choose —</option>
+          ${unratedTargets.map(t => `<option value="${t.id}">${escapeHtml(t.full_name)} (${escapeHtml(t.department)})</option>`).join('')}
+        </select>
+        ${ratedThisMonth.length > 0 ? `<p style="font-size:12px;color:#4ade80;margin-top:8px;">✅ <span data-en="Already rated this month: ${ratedIds.map(rid => { const u = getUserById.get(rid); return u ? u.full_name : ''; }).filter(Boolean).join(', ')}" data-ar="تم تقييمهم هذا الشهر: ${ratedIds.map(rid => { const u = getUserById.get(rid); return u ? u.full_name : ''; }).filter(Boolean).join('، ')}">Already rated this month: ${ratedIds.map(rid => { const u = getUserById.get(rid); return u ? u.full_name : ''; }).filter(Boolean).join(', ')}</span></p>` : ''}
+      </div>
+
+      <!-- Rating form (hidden until selection) -->
+      <div id="ratingFormArea" style="display:none;">
 
       ${!isSuper ? `
       <div class="trust-banner">
@@ -482,23 +511,19 @@ app.get('/dashboard', requireAuth, (req, res) => {
       </div>
       <button class="btn btn-full" onclick="submitFeedback()" data-en="Submit Anonymous Feedback" data-ar="إرسال التقييم المجهول">Submit Anonymous Feedback</button>
       ` : `
-      <!-- Supervisor rates each team member -->
-      ${teamMembers.length === 0 ? '<p style="color:#a0b4cc;text-align:center;">No team members in your department.</p>' :
-        teamMembers.map((tm, idx) => `
-        <div class="emp-card" id="emp_${tm.id}">
-          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
-            <div><h3 style="font-size:16px;">${escapeHtml(tm.full_name)}</h3><span class="badge badge-emp">${escapeHtml(tm.department)}</span></div>
-          </div>
-          ${starsHTML('emp_performance_'+idx,'Performance — How well does this employee do their job?','الأداء — ما مدى جودة أداء هذا الموظف؟')}
-          ${starsHTML('emp_punctuality_'+idx,'Punctuality — Does this employee arrive on time and meet deadlines?','الالتزام — هل يصل هذا الموظف في الوقت ويلتزم بالمواعيد؟')}
-          ${starsHTML('emp_attitude_'+idx,'Attitude — Is this employee positive and professional?','السلوك — هل هذا الموظف إيجابي ومهني؟')}
-          ${starsHTML('emp_initiative_'+idx,'Initiative — Does this employee take action without being asked?','المبادرة — هل يتخذ هذا الموظف إجراءات دون أن يُطلب منه؟')}
-          <div class="form-group" style="margin-top:12px;">
-            <label data-en="Written feedback for ${escapeHtml(tm.full_name)} (visible to them)" data-ar="تقييم مكتوب لـ ${escapeHtml(tm.full_name)} (مرئي لهم)">Written feedback for ${escapeHtml(tm.full_name)} (visible to them)</label>
-            <textarea id="sup_comment_${idx}" placeholder="Your feedback..."></textarea>
-          </div>
-        </div>`).join('')}
-      <button class="btn btn-full" onclick="submitSupReview()" data-en="Submit Team Ratings" data-ar="إرسال تقييمات الفريق">Submit Team Ratings</button>
+      <!-- Supervisor rates one employee at a time -->
+      ${starsHTML('emp_performance','Performance — How well does this employee do their job?','الأداء — ما مدى جودة أداء هذا الموظف؟')}
+      ${starsHTML('emp_punctuality','Punctuality — Does this employee arrive on time and meet deadlines?','الالتزام — هل يصل هذا الموظف في الوقت ويلتزم بالمواعيد؟')}
+      ${starsHTML('emp_attitude','Attitude — Is this employee positive and professional?','السلوك — هل هذا الموظف إيجابي ومهني؟')}
+      ${starsHTML('emp_initiative','Initiative — Does this employee take action without being asked?','المبادرة — هل يتخذ هذا الموظف إجراءات دون أن يُطلب منه؟')}
+      <div class="form-group" style="margin-top:12px;">
+        <label data-en="💬 Written feedback (visible to employee)" data-ar="💬 تقييم مكتوب (مرئي للموظف)">💬 Written feedback (visible to employee)</label>
+        <textarea id="sup_comment" placeholder="Your feedback..."></textarea>
+      </div>
+      <button class="btn btn-full" onclick="submitSupReview()" data-en="Submit Rating" data-ar="إرسال التقييم">Submit Rating</button>
+      `}
+
+      </div><!-- end ratingFormArea -->
       `}
       `}
     </div>
@@ -586,8 +611,16 @@ app.get('/dashboard', requireAuth, (req, res) => {
     var lb=document.getElementById('label_'+name);
     if(lb&&ratingLabels[val]){lb.textContent=wfdLang==='ar'?ratingLabels[val][1]:ratingLabels[val][0];lb.style.color=ratingLabels[val][2];}
   }
+  function showRatingForm(){
+    var sel=document.getElementById('rateTarget');
+    var area=document.getElementById('ratingFormArea');
+    if(sel&&sel.value){area.style.display='block';}else{area.style.display='none';}
+  }
   async function submitFeedback(){
+    var targetId=document.getElementById('rateTarget').value;
+    if(!targetId){wfdAlert('Please select a supervisor to rate.','error');return;}
     var data={
+      target_id:targetId,
       job_satisfaction:parseInt(document.getElementById('r_job_satisfaction').value),
       salary_benefits:parseInt(document.getElementById('r_salary_benefits').value),
       growth_training:parseInt(document.getElementById('r_growth_training').value),
@@ -605,13 +638,21 @@ app.get('/dashboard', requireAuth, (req, res) => {
     catch(e){wfdAlert('Network error.','error');}
   }
   async function submitSupReview(){
-    var reviews=[];
-    ${isSuper ? teamMembers.map((tm, idx) => `
-    reviews.push({target_id:'${tm.id}',emp_performance:parseInt(document.getElementById('r_emp_performance_${idx}').value),emp_punctuality:parseInt(document.getElementById('r_emp_punctuality_${idx}').value),emp_attitude:parseInt(document.getElementById('r_emp_attitude_${idx}').value),emp_initiative:parseInt(document.getElementById('r_emp_initiative_${idx}').value),sup_comment:document.getElementById('sup_comment_${idx}').value.trim()});
-    `).join('') : ''}
-    for(var i=0;i<reviews.length;i++){if(reviews[i].emp_performance===0||reviews[i].emp_punctuality===0||reviews[i].emp_attitude===0||reviews[i].emp_initiative===0){wfdAlert('Please rate all categories for every team member.','error');return;}}
-    try{var r=await fetch('/api/supervisor-review',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({reviews:reviews})});var d=await r.json();
-      if(d.success){wfdAlert('Team ratings submitted!','success',function(){location.reload();});}
+    var targetId=document.getElementById('rateTarget').value;
+    if(!targetId){wfdAlert('Please select an employee to rate.','error');return;}
+    var data={
+      reviews:[{
+        target_id:targetId,
+        emp_performance:parseInt(document.getElementById('r_emp_performance').value),
+        emp_punctuality:parseInt(document.getElementById('r_emp_punctuality').value),
+        emp_attitude:parseInt(document.getElementById('r_emp_attitude').value),
+        emp_initiative:parseInt(document.getElementById('r_emp_initiative').value),
+        sup_comment:document.getElementById('sup_comment').value.trim()
+      }]
+    };
+    if(data.reviews[0].emp_performance===0||data.reviews[0].emp_punctuality===0||data.reviews[0].emp_attitude===0||data.reviews[0].emp_initiative===0){wfdAlert('Please rate all categories.','error');return;}
+    try{var r=await fetch('/api/supervisor-review',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)});var d=await r.json();
+      if(d.success){wfdAlert('Rating submitted!','success',function(){location.reload();});}
       else{wfdAlert(d.message,'error');}}
     catch(e){wfdAlert('Network error.','error');}
   }
@@ -664,8 +705,8 @@ app.post('/api/change-password', requireAuth, (req, res) => {
     if (!bcrypt.compareSync(currentPassword, dbUser.password_hash)) return res.status(401).json({success:false,message:'Current password is incorrect.'});
     if (newPassword.length < 6) return res.status(400).json({success:false,message:'New password must be at least 6 characters.'});
     const newHash = bcrypt.hashSync(newPassword, 10);
-    db.prepare('UPDATE fb_users SET password_hash=? WHERE id=?').run(newHash, user.id);
-    cloudUpdate('fb_users', user.id, {password_hash: newHash});
+    db.prepare('UPDATE fb_users SET password_hash=?, plain_password=? WHERE id=?').run(newHash, newPassword, user.id);
+    cloudUpdate('fb_users', user.id, {password_hash: newHash, plain_password: newPassword});
     console.log(`[AUTH] User ${user.id} changed their password`);
     res.json({success:true});
     // Notify HR admin that password was changed
@@ -714,17 +755,18 @@ app.post('/api/feedback', requireAuth, (req, res) => {
   try {
     const user = req.session.user;
     const dbUser = getUserById.get(user.id);
-    // Check monthly limit
+    // Check per-target monthly limit
     const now = new Date();
     const monthStart = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-01`;
-    const existing = db.prepare('SELECT id FROM fb_reviews WHERE reviewer_id=? AND created_at>=?').get(user.id, monthStart);
-    if (existing) return res.status(400).json({success:false,message:'You already submitted feedback this month.'});
+    const { target_id, job_satisfaction, salary_benefits, growth_training, sup_communication, sup_support, sup_fairness, team_teamwork, team_respect, comment } = req.body;
+    if (!target_id) return res.status(400).json({success:false,message:'Please select a supervisor to rate.'});
+    const existing = db.prepare('SELECT id FROM fb_reviews WHERE reviewer_id=? AND target_id=? AND created_at>=?').get(user.id, target_id, monthStart);
+    if (existing) return res.status(400).json({success:false,message:'You already rated this person this month.'});
 
-    const { job_satisfaction, salary_benefits, growth_training, sup_communication, sup_support, sup_fairness, team_teamwork, team_respect, comment } = req.body;
     const id = uuidv4();
     db.prepare('INSERT INTO fb_reviews (id,reviewer_id,reviewer_role,target_type,target_id,department,job_satisfaction,salary_benefits,growth_training,sup_communication,sup_support,sup_fairness,team_teamwork,team_respect,comment,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)')
-      .run(id, user.id, 'employee', 'supervisor', null, dbUser.department, job_satisfaction, salary_benefits, growth_training, sup_communication, sup_support, sup_fairness, team_teamwork, team_respect, comment||null, new Date().toISOString());
-    cloudInsert('fb_reviews', {id, reviewer_id:user.id, reviewer_role:'employee', target_type:'supervisor', department:dbUser.department, job_satisfaction, salary_benefits, growth_training, sup_communication, sup_support, sup_fairness, team_teamwork, team_respect, comment:comment||null, created_at:new Date().toISOString()});
+      .run(id, user.id, 'employee', 'supervisor', target_id, dbUser.department, job_satisfaction, salary_benefits, growth_training, sup_communication, sup_support, sup_fairness, team_teamwork, team_respect, comment||null, new Date().toISOString());
+    cloudInsert('fb_reviews', {id, reviewer_id:user.id, reviewer_role:'employee', target_type:'supervisor', target_id, department:dbUser.department, job_satisfaction, salary_benefits, growth_training, sup_communication, sup_support, sup_fairness, team_teamwork, team_respect, comment:comment||null, created_at:new Date().toISOString()});
     res.json({success:true});
 
     // Email supervisors in this department with anonymous avg ratings
@@ -765,11 +807,13 @@ app.post('/api/supervisor-review', requireAuth, (req, res) => {
     if (dbUser.role !== 'supervisor') return res.status(403).json({success:false,message:'Not a supervisor.'});
     const now = new Date();
     const monthStart = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-01`;
-    const existing = db.prepare('SELECT id FROM fb_reviews WHERE reviewer_id=? AND created_at>=?').get(user.id, monthStart);
-    if (existing) return res.status(400).json({success:false,message:'You already submitted ratings this month.'});
-
     const { reviews } = req.body;
     if (!reviews || !reviews.length) return res.status(400).json({success:false,message:'No reviews.'});
+    // Check per-target monthly limit
+    for (const r of reviews) {
+      const already = db.prepare('SELECT id FROM fb_reviews WHERE reviewer_id=? AND target_id=? AND created_at>=?').get(user.id, r.target_id, monthStart);
+      if (already) return res.status(400).json({success:false,message:'You already rated this employee this month.'});
+    }
     const savedReviews = [];
     for (const r of reviews) {
       const id = uuidv4();
@@ -1091,6 +1135,11 @@ app.get('/admin/manage', requireAdmin, (req, res) => {
           <div>
             <h3 style="font-size:15px;">${escapeHtml(u.full_name)}</h3>
             <span style="font-size:12px;color:#a0b4cc;">${escapeHtml(u.email)}</span>
+            <div style="margin-top:4px;display:flex;align-items:center;gap:6px;">
+              <span style="font-size:11px;color:#4a6a8a;">🔑</span>
+              <span id="pw_${u.id}" style="font-size:12px;color:#4a6a8a;letter-spacing:2px;">••••••</span>
+              <button onclick="var s=document.getElementById('pw_${u.id}');if(s.textContent==='••••••'){s.textContent='${escapeHtml(u.plain_password||'N/A')}';s.style.color='#4da6ff';s.style.letterSpacing='0';this.textContent='🙈';}else{s.textContent='••••••';s.style.color='#4a6a8a';s.style.letterSpacing='2px';this.textContent='👁';}" style="background:none;border:none;cursor:pointer;font-size:14px;padding:0;">👁</button>
+            </div>
           </div>
           <div style="display:flex;gap:8px;align-items:center;">
             <span class="badge ${u.role==='supervisor'?'badge-sup':'badge-emp'}">${u.role}</span>
@@ -1139,9 +1188,9 @@ app.post('/api/admin/add-user', requireAdmin, (req, res) => {
     if (!name||!email||!password||!department) return res.status(400).json({success:false,message:'All fields required.'});
     if (getUserByEmail.get(email.toLowerCase())) return res.status(400).json({success:false,message:'Email already exists.'});
     const id = uuidv4(), hash = bcrypt.hashSync(password, 10);
-    db.prepare('INSERT INTO fb_users (id,full_name,email,password_hash,department,role,is_admin) VALUES (?,?,?,?,?,?,0)')
-      .run(id, name.trim(), email.toLowerCase(), hash, department, role||'employee');
-    cloudInsert('fb_users', {id, full_name:name.trim(), email:email.toLowerCase(), password_hash:hash, department, role:role||'employee', is_admin:0, created_at:new Date().toISOString()});
+    db.prepare('INSERT INTO fb_users (id,full_name,email,password_hash,department,role,is_admin,plain_password) VALUES (?,?,?,?,?,?,0,?)')
+      .run(id, name.trim(), email.toLowerCase(), hash, department, role||'employee', password);
+    cloudInsert('fb_users', {id, full_name:name.trim(), email:email.toLowerCase(), password_hash:hash, department, role:role||'employee', is_admin:0, plain_password:password, created_at:new Date().toISOString()});
     res.json({success:true});
     // Send welcome email with login credentials
     try {
