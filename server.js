@@ -1264,7 +1264,7 @@ app.get('/admin/manage', requireAdmin, (req, res) => {
     if(!n||!e||!p){wfdAlert('All fields required.','error');return;}
     try{var res=await fetch('/api/admin/add-user',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:n,email:e,password:p,department:d,role:r,confirmDuplicate:confirmDup||false})});var data=await res.json();
       if(data.success){wfdAlert('User added!','success',function(){location.reload();});}
-      else if(data.duplicate){if(confirm(data.message+'\n\nAdd anyway?')){addUser(true);};}
+      else if(data.duplicate){if(confirm(data.message+'\\n\\nAdd anyway?')){addUser(true);};}
       else{wfdAlert(data.message,'error');}}
     catch(x){wfdAlert('Network error.','error');}
   }
@@ -1279,7 +1279,7 @@ app.get('/admin/manage', requireAdmin, (req, res) => {
     var nameVal=window._editNameVal;
     try{var r=await fetch('/api/admin/change-name',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({userId:id,newName:nameVal,confirmDuplicate:confirmDup||false})});var d=await r.json();
       if(d.success){wfdAlert('Name changed!','success',function(){location.reload();});}
-      else if(d.duplicate){if(confirm(d.message+'\n\nChange anyway?')){editName(id,currentName,true);};}
+      else if(d.duplicate){if(confirm(d.message+'\\n\\nChange anyway?')){editName(id,currentName,true);};}
       else{wfdAlert(d.message,'error');}}
     catch(x){wfdAlert('Network error.','error');}
   }
