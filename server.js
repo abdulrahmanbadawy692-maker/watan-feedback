@@ -846,6 +846,7 @@ app.post('/api/feedback', requireAuth, (req, res) => {
             <tr><td style="padding:8px;color:#a0b4cc;">Teamwork</td><td style="padding:8px;color:#ffc107;font-weight:700;">${calcAvg(deptReviews,'team_teamwork')} / 5</td></tr>
             <tr><td style="padding:8px;color:#a0b4cc;">Respect</td><td style="padding:8px;color:#ffc107;font-weight:700;">${calcAvg(deptReviews,'team_respect')} / 5</td></tr>
           </table>
+          <div style="background:rgba(77,166,255,0.1);border:1px solid rgba(77,166,255,0.3);border-radius:8px;padding:10px;margin-top:12px;text-align:center;"><p style="color:#4da6ff;font-size:13px;font-weight:600;">📌 These are the latest department averages for this month.</p></div>
           <p style="font-size:12px;color:#4a6a8a;">This is an automated notification from Watan First Digital Feedback System.</p>
         </div>`;
         for (const sup of supervisors) {
@@ -898,6 +899,7 @@ app.post('/api/supervisor-review', requireAuth, (req, res) => {
           </table>
           ${r.sup_comment ? `<div style="background:rgba(77,166,255,0.1);border-radius:8px;padding:12px;margin:12px 0;"><p style="color:#a0b4cc;font-size:14px;">Supervisor Comment: "${r.sup_comment}"</p></div>` : ''}
           <p style="color:#a0b4cc;font-size:13px;">Log in to the feedback system to see your full history.</p>
+          <div style="background:rgba(77,166,255,0.1);border:1px solid rgba(77,166,255,0.3);border-radius:8px;padding:10px;margin-top:12px;text-align:center;"><p style="color:#4da6ff;font-size:13px;font-weight:600;">📌 This is your final rating for this month.</p></div>
           <p style="font-size:12px;color:#4a6a8a;">This is an automated notification from Watan First Digital Feedback System.</p>
         </div>`;
         sendBrevoEmail(emp.email, 'New Supervisor Rating — Watan First Digital', emailHtml);
