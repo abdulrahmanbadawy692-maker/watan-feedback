@@ -1283,10 +1283,11 @@ app.get('/admin/manage', requireAdmin, (req, res) => {
   <script>
   function wfdAlert(msg,type,cb){var ic=type==='success'?'✅':type==='error'?'❌':'ℹ️';var cl=type==='success'?'#28a745':type==='error'?'#dc3545':'#4da6ff';var t=document.createElement('div');t.style.cssText='position:fixed;top:20px;left:50%;transform:translateX(-50%);z-index:99999;background:#132a45;border:1px solid '+cl+';border-radius:12px;padding:14px 24px;display:flex;align-items:center;gap:12px;box-shadow:0 8px 30px rgba(0,0,0,0.4);max-width:500px;width:90%;';t.innerHTML='<span style="font-size:24px;flex-shrink:0;">'+ic+'</span><p style="font-size:14px;color:#fff;line-height:1.4;flex:1;">'+msg+'</p><button style="padding:6px 16px;background:'+cl+';color:#fff;border:none;border-radius:6px;font-size:12px;font-weight:600;cursor:pointer;font-family:inherit;flex-shrink:0;">OK</button>';t.querySelector('button').onclick=function(){t.remove();if(cb)cb();};document.body.appendChild(t);if(!cb)setTimeout(function(){if(t.parentNode)t.remove();},4000);}
   function filterUsers(){var q=document.getElementById('userSearch').value.toLowerCase();document.querySelectorAll('.user-row').forEach(function(el){var n=el.getAttribute('data-name')||'';var e=el.getAttribute('data-email')||'';el.style.display=(n.includes(q)||e.includes(q))?'flex':'none';});}
-  async function addUser(){var n=document.getElementById('aName').value.trim(),e=document.getElementById('aEmailAdd').value.trim(),p=document.getElementById('aPassAdd').value,d=document.getElementById('aDept').value,r=document.getElementById('aRole').value;
+  async function addUser(confirmDup){var n=document.getElementById('aName').value.trim(),e=document.getElementById('aEmailAdd').value.trim(),p=document.getElementById('aPassAdd').value,d=document.getElementById('aDept').value,r=document.getElementById('aRole').value;
     if(!n||!e||!p){wfdAlert('All fields required.','error');return;}
-    try{var res=await fetch('/api/admin/add-user',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:n,email:e,password:p,department:d,role:r})});var data=await res.json();
+    try{var res=await fetch('/api/admin/add-user',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:n,email:e,password:p,department:d,role:r,confirmDuplicate:confirmDup||false})});var data=await res.json();
       if(data.success){wfdAlert('User added!','success',function(){location.reload();});}
+      else if(data.duplicate){if(confirm(data.message+'\n\nAdd anyway?')){addUser(true);};}
       else{wfdAlert(data.message,'error');}}
     catch(x){wfdAlert('Network error.','error');}
   }
@@ -1296,12 +1297,12 @@ app.get('/admin/manage', requireAdmin, (req, res) => {
       else{wfdAlert(d.message,'error');}}
     catch(x){wfdAlert('Network error.','error');}
   }
-  async function editName(id,currentName){
-    var nn=prompt('Enter new name for "'+currentName+'":',currentName);
-    if(!nn||!nn.trim()){return;}
-    if(nn.trim()===currentName){wfdAlert('Same name.','error');return;}
-    try{var r=await fetch('/api/admin/change-name',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({userId:id,newName:nn.trim()})});var d=await r.json();
+  async function editName(id,currentName,confirmDup){
+    if(!confirmDup){var nn=prompt('Enter new name for "'+currentName+'":',currentName);if(!nn||!nn.trim())return;if(nn.trim()===currentName){wfdAlert('Same name.','error');return;}window._editNameVal=nn.trim();}
+    var nameVal=window._editNameVal;
+    try{var r=await fetch('/api/admin/change-name',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({userId:id,newName:nameVal,confirmDuplicate:confirmDup||false})});var d=await r.json();
       if(d.success){wfdAlert('Name changed!','success',function(){location.reload();});}
+      else if(d.duplicate){if(confirm(d.message+'\n\nChange anyway?')){editName(id,currentName,true);};}
       else{wfdAlert(d.message,'error');}}
     catch(x){wfdAlert('Network error.','error');}
   }
@@ -1349,7 +1350,7 @@ app.post('/api/admin/add-user', requireAdmin, (req, res) => {
     if (!name||!email||!password||!department) return res.status(400).json({success:false,message:'All fields required.'});
     if (getUserByEmail.get(email.toLowerCase())) return res.status(400).json({success:false,message:'Email already exists.'});
     const nameExists = db.prepare('SELECT id FROM fb_users WHERE LOWER(full_name)=LOWER(?) AND is_admin=0').get(name.trim());
-    if (nameExists) return res.status(400).json({success:false,message:'A user with this name already exists. Please use a different name.'});
+    if (nameExists && !req.body.confirmDuplicate) return res.status(409).json({success:false,message:'Another user named "'+name.trim()+'" already exists. Consider adding a last name to avoid confusion.',duplicate:true});
     const id = uuidv4(), hash = bcrypt.hashSync(password, 10);
     db.prepare('INSERT INTO fb_users (id,full_name,email,password_hash,department,role,is_admin,plain_password) VALUES (?,?,?,?,?,?,0,?)')
       .run(id, name.trim(), email.toLowerCase(), hash, department, role||'employee', password);
@@ -1398,7 +1399,7 @@ app.post('/api/admin/change-name', requireAdmin, (req, res) => {
     const user = getUserById.get(userId);
     if (!user||user.is_admin) return res.status(400).json({success:false,message:'User not found.'});
     const nameExists = db.prepare('SELECT id FROM fb_users WHERE LOWER(full_name)=LOWER(?) AND id!=? AND is_admin=0').get(newName.trim(), userId);
-    if (nameExists) return res.status(400).json({success:false,message:'A user with this name already exists. Please use a different name.'});
+    if (nameExists && !req.body.confirmDuplicate) return res.status(409).json({success:false,message:'Another user named "'+newName.trim()+'" already exists. Consider adding a last name to avoid confusion.',duplicate:true});
     db.prepare('UPDATE fb_users SET full_name=? WHERE id=?').run(newName.trim(), userId);
     cloudUpdate('fb_users', userId, {full_name: newName.trim()});
     console.log(`[ADMIN] Name changed for ${userId}: ${user.full_name} → ${newName.trim()}`);
