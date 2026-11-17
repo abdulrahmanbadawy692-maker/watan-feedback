@@ -243,9 +243,10 @@ function pageHead(title) {
   function toggleEye(inputId,btnEl){var i=document.getElementById(inputId);if(!i)return;if(i.type==='password'){i.type='text';btnEl.innerHTML=_eyeOpen;}else{i.type='password';btnEl.innerHTML=_eyeClosed;}}
   function togglePwEye(uid,btnEl,pw){var s=document.getElementById('pw_'+uid);if(!s)return;if(s.dataset.shown!=='1'){s.textContent=pw;s.style.color='#4da6ff';s.style.letterSpacing='0';s.dataset.shown='1';btnEl.innerHTML=_eyeOpen;}else{s.textContent='\\u2022\\u2022\\u2022\\u2022\\u2022\\u2022';s.style.color='#4a6a8a';s.style.letterSpacing='2px';s.dataset.shown='0';btnEl.innerHTML=_eyeClosed;}}
   function wfdAlert(msg,type,cb){var ic=type==='success'?'✅':type==='error'?'❌':'ℹ️';var cl=type==='success'?'#28a745':type==='error'?'#dc3545':'#4da6ff';
+  var ov=document.createElement('div');ov.style.cssText='position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.5);z-index:99998;';
   var t=document.createElement('div');t.style.cssText='position:fixed;top:20px;left:50%;transform:translateX(-50%);z-index:99999;background:#132a45;border:1px solid '+cl+';border-radius:12px;padding:14px 24px;display:flex;align-items:center;gap:12px;box-shadow:0 8px 30px rgba(0,0,0,0.4);max-width:500px;width:90%;animation:wfdSlideDown .3s;';
   t.innerHTML='<span style="font-size:24px;flex-shrink:0;">'+ic+'</span><p style="font-size:14px;color:#fff;line-height:1.4;flex:1;">'+msg+'</p><button style="padding:6px 16px;background:'+cl+';color:#fff;border:none;border-radius:6px;font-size:12px;font-weight:600;cursor:pointer;font-family:inherit;flex-shrink:0;">OK</button>';
-  t.querySelector('button').onclick=function(){t.style.animation='wfdSlideUp .2s forwards';setTimeout(function(){t.remove();if(cb)cb();},200);};document.body.appendChild(t);if(!cb)setTimeout(function(){if(t.parentNode){t.style.animation='wfdSlideUp .2s forwards';setTimeout(function(){t.remove();},200);}},4000);}
+  t.querySelector('button').onclick=function(){ov.remove();t.style.animation='wfdSlideUp .2s forwards';setTimeout(function(){t.remove();if(cb)cb();},200);};document.body.appendChild(ov);document.body.appendChild(t);}
   </script>
   ${langToggleScript()}
   ${darkModeScript()}
@@ -1165,7 +1166,6 @@ app.get('/admin/dashboard', requireAdmin, (req, res) => {
       else{wfdAlert(d.message||'Error sending reminders.','error');}
     }catch(e){wfdAlert('Network error.','error');}
   }
-  function wfdAlert(msg,type,cb){var ic=type==='success'?'\\u2705':type==='error'?'\\u274C':'\\u2139\\uFE0F';var cl=type==='success'?'#28a745':type==='error'?'#dc3545':'#4da6ff';var t=document.createElement('div');t.style.cssText='position:fixed;top:20px;left:50%;transform:translateX(-50%);z-index:99999;background:#132a45;border:1px solid '+cl+';border-radius:12px;padding:14px 24px;display:flex;align-items:center;gap:12px;box-shadow:0 8px 30px rgba(0,0,0,0.4);max-width:500px;width:90%;';t.innerHTML='<span style="font-size:24px;flex-shrink:0;">'+ic+'</span><p style="font-size:14px;color:#fff;line-height:1.4;flex:1;">'+msg+'</p><button style="padding:6px 16px;background:'+cl+';color:#fff;border:none;border-radius:6px;font-size:12px;font-weight:600;cursor:pointer;font-family:inherit;flex-shrink:0;">OK</button>';t.querySelector('button').onclick=function(){t.remove();if(cb)cb();};document.body.appendChild(t);if(!cb)setTimeout(function(){if(t.parentNode)t.remove();},4000);}
   </script>
   </body></html>`);
 });
@@ -1253,7 +1253,6 @@ app.get('/admin/manage', requireAdmin, (req, res) => {
   </div>
   ${footerHTML()}
   <script>
-  function wfdAlert(msg,type,cb){var ic=type==='success'?'\\u2705':type==='error'?'\\u274C':'\\u2139\\uFE0F';var cl=type==='success'?'#28a745':type==='error'?'#dc3545':'#4da6ff';var t=document.createElement('div');t.style.cssText='position:fixed;top:20px;left:50%;transform:translateX(-50%);z-index:99999;background:#132a45;border:1px solid '+cl+';border-radius:12px;padding:14px 24px;display:flex;align-items:center;gap:12px;box-shadow:0 8px 30px rgba(0,0,0,0.4);max-width:500px;width:90%;';t.innerHTML='<span style="font-size:24px;flex-shrink:0;">'+ic+'</span><p style="font-size:14px;color:#fff;line-height:1.4;flex:1;">'+msg+'</p><button style="padding:6px 16px;background:'+cl+';color:#fff;border:none;border-radius:6px;font-size:12px;font-weight:600;cursor:pointer;font-family:inherit;flex-shrink:0;">OK</button>';t.querySelector('button').onclick=function(){t.remove();if(cb)cb();};document.body.appendChild(t);if(!cb)setTimeout(function(){if(t.parentNode)t.remove();},4000);}
   function filterUsers(){var q=document.getElementById('userSearch').value.toLowerCase();document.querySelectorAll('.user-row').forEach(function(el){var n=el.getAttribute('data-name')||'';var e=el.getAttribute('data-email')||'';el.style.display=(n.includes(q)||e.includes(q))?'flex':'none';});}
   async function addUser(confirmDup){var n=document.getElementById('aName').value.trim(),e=document.getElementById('aEmailAdd').value.trim(),p=document.getElementById('aPassAdd').value,d=document.getElementById('aDept').value,r=document.getElementById('aRole').value;
     if(!n||!e||!p){wfdAlert('All fields required.','error');return;}
