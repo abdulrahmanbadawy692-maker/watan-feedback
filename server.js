@@ -811,41 +811,43 @@ app.delete('/api/feedback/delete-rating/:reviewId', requireAuth, async (req, res
     const submittedAt = new Date(ca2.includes('Z') || ca2.includes('+') ? ca2 : ca2 + 'Z');
     const hoursSince = isNaN(submittedAt.getTime()) ? 999 : (now.getTime() - submittedAt.getTime()) / (1000 * 60 * 60);
     if (hoursSince > 24) return res.status(400).json({success:false,message:'The 24-hour edit window has passed. You cannot delete this feedback.'});
+    // Save target info BEFORE deleting
+    const dept = existing.department;
+    const targetId = existing.target_id;
+    const reviewerRole = existing.reviewer_role;
+    console.log('[DELETE] reviewer_role:', reviewerRole, 'target_id:', targetId, 'dept:', dept);
+
     // Delete from SQLite
     db.prepare('DELETE FROM fb_reviews WHERE id=?').run(existing.id);
     // Delete from Supabase
     try { await supabase.from('fb_reviews').delete().eq('id', existing.id); } catch(e) {}
-    console.log(`[FEEDBACK] User ${user.id} deleted their feedback (within 24h window)`);
-    res.json({success:true});
+    console.log('[DELETE] Review deleted from DB');
 
     // Email the rated person that their rating was removed
-    const dept = existing.department;
-    const targetId = existing.target_id;
-    const reviewerRole = existing.reviewer_role;
-    console.log('[DELETE-EMAIL] reviewer_role:', reviewerRole, 'target_id:', targetId, 'dept:', dept);
+    let emailSent = false;
     try {
-      const removedHtml = (name) => '<div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;background:#0a1628;color:#fff;padding:30px;border-radius:12px;"><h2 style="color:#4da6ff;">Rating Removed</h2><p style="color:#a0b4cc;">Hello <strong>' + name + '</strong>,</p><p style="color:#a0b4cc;">An anonymous rating in the <strong>' + dept + '</strong> department has been removed from the system.</p><p style="color:#a0b4cc;font-size:13px;">A new rating may be submitted. Check your dashboard for the latest results.</p><p style="font-size:12px;color:#4a6a8a;">Watan First Digital Feedback System</p></div>';
-      if (reviewerRole === 'employee') {
-        if (targetId) {
-          const sup = getUserById.get(targetId);
-          console.log('[DELETE-EMAIL] Target supervisor:', sup ? sup.email : 'NOT FOUND');
-          if (sup) await sendBrevoEmail(sup.email, 'Rating Removed — Watan First Digital', removedHtml(sup.full_name));
+      const removedHtml = (name) => '<div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;background:#0a1628;color:#fff;padding:30px;border-radius:12px;"><h2 style="color:#4da6ff;">Rating Removed</h2><p style="color:#a0b4cc;">Hello <strong>' + name + '</strong>,</p><p style="color:#a0b4cc;">A rating about you in the <strong>' + dept + '</strong> department has been removed from the system.</p><p style="color:#a0b4cc;font-size:13px;">A new rating may be submitted. Check your dashboard for the latest results.</p><p style="font-size:12px;color:#4a6a8a;">Watan First Digital Feedback System</p></div>';
+      if (targetId) {
+        const target = getUserById.get(targetId);
+        if (target) {
+          console.log('[DELETE-EMAIL] Sending removal email to:', target.email);
+          await sendBrevoEmail(target.email, 'Rating Removed — Watan First Digital', removedHtml(target.full_name));
+          emailSent = true;
+          console.log('[DELETE-EMAIL] Email sent successfully');
         } else {
-          console.log('[DELETE-EMAIL] No specific target — skipping email');
+          console.log('[DELETE-EMAIL] Target user not found in DB');
         }
-      } else if (reviewerRole === 'supervisor') {
-        if (targetId) {
-          const emp = getUserById.get(targetId);
-          console.log('[DELETE-EMAIL] Target employee:', emp ? emp.email : 'NOT FOUND');
-          if (emp) await sendBrevoEmail(emp.email, 'Rating Removed — Watan First Digital', removedHtml(emp.full_name));
-        }
+      } else {
+        console.log('[DELETE-EMAIL] No target_id — cannot send email');
       }
     } catch(emailErr) { console.error('[DELETE-EMAIL] Error:', emailErr.message); }
+
+    res.json({success:true, emailSent});
   } catch(e) { console.error('[ERROR] Delete feedback:', e); res.status(500).json({success:false,message:'Server error.'}); }
 });
 
 // ── FEEDBACK API (anonymous) ────────────────────────────────
-app.post('/api/feedback', requireAuth, (req, res) => {
+app.post('/api/feedback', requireAuth, async (req, res) => {
   try {
     const user = req.session.user;
     const dbUser = getUserById.get(user.id);
@@ -863,32 +865,29 @@ app.post('/api/feedback', requireAuth, (req, res) => {
     cloudInsert('fb_reviews', {id, reviewer_id:user.id, reviewer_role:'employee', target_type:'supervisor', target_id, department:dbUser.department, job_satisfaction, salary_benefits, growth_training, sup_communication, sup_support, sup_fairness, team_teamwork, team_respect, comment:comment||null, created_at:new Date().toISOString()});
     res.json({success:true});
 
-    // Email supervisors in this department with anonymous avg ratings
+    // Email ONLY the specific supervisor who was rated
     try {
-      const supervisors = db.prepare("SELECT * FROM fb_users WHERE department=? AND role='supervisor' AND is_admin=0").all(dbUser.department);
-      const deptReviews = db.prepare("SELECT * FROM fb_reviews WHERE reviewer_role='employee' AND department=?").all(dbUser.department);
-      if (supervisors.length && deptReviews.length) {
-        const calcAvg = (arr, f) => { const v = arr.filter(r=>r[f]); return v.length ? (v.reduce((s,r)=>s+r[f],0)/v.length).toFixed(1) : '—'; };
+      const ratedSup = getUserById.get(target_id);
+      if (ratedSup) {
         const emailHtml = `<div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;background:#0a1628;color:#fff;padding:30px;border-radius:12px;">
           <h2 style="color:#4da6ff;">Your Rating Has Been Updated</h2>
-          <p style="color:#a0b4cc;">Department: <strong>${dbUser.department}</strong></p>
-          <p style="color:#a0b4cc;">An anonymous rating about you has been submitted or updated. Here are the current department averages:</p>
+          <p style="color:#a0b4cc;">Hello <strong>${ratedSup.full_name}</strong>,</p>
+          <p style="color:#a0b4cc;">An anonymous employee has submitted a rating about you.</p>
           <table style="width:100%;border-collapse:collapse;margin:16px 0;">
-            <tr><td style="padding:8px;color:#a0b4cc;">Job Satisfaction</td><td style="padding:8px;color:#ffc107;font-weight:700;">${calcAvg(deptReviews,'job_satisfaction')} / 5</td></tr>
-            <tr><td style="padding:8px;color:#a0b4cc;">Salary & Benefits</td><td style="padding:8px;color:#ffc107;font-weight:700;">${calcAvg(deptReviews,'salary_benefits')} / 5</td></tr>
-            <tr><td style="padding:8px;color:#a0b4cc;">Growth & Training</td><td style="padding:8px;color:#ffc107;font-weight:700;">${calcAvg(deptReviews,'growth_training')} / 5</td></tr>
-            <tr><td style="padding:8px;color:#a0b4cc;">Communication</td><td style="padding:8px;color:#ffc107;font-weight:700;">${calcAvg(deptReviews,'sup_communication')} / 5</td></tr>
-            <tr><td style="padding:8px;color:#a0b4cc;">Support</td><td style="padding:8px;color:#ffc107;font-weight:700;">${calcAvg(deptReviews,'sup_support')} / 5</td></tr>
-            <tr><td style="padding:8px;color:#a0b4cc;">Fairness</td><td style="padding:8px;color:#ffc107;font-weight:700;">${calcAvg(deptReviews,'sup_fairness')} / 5</td></tr>
-            <tr><td style="padding:8px;color:#a0b4cc;">Teamwork</td><td style="padding:8px;color:#ffc107;font-weight:700;">${calcAvg(deptReviews,'team_teamwork')} / 5</td></tr>
-            <tr><td style="padding:8px;color:#a0b4cc;">Respect</td><td style="padding:8px;color:#ffc107;font-weight:700;">${calcAvg(deptReviews,'team_respect')} / 5</td></tr>
+            <tr><td style="padding:8px;color:#a0b4cc;">Job Satisfaction</td><td style="padding:8px;color:#ffc107;font-weight:700;">${job_satisfaction} / 5</td></tr>
+            <tr><td style="padding:8px;color:#a0b4cc;">Salary & Benefits</td><td style="padding:8px;color:#ffc107;font-weight:700;">${salary_benefits} / 5</td></tr>
+            <tr><td style="padding:8px;color:#a0b4cc;">Growth & Training</td><td style="padding:8px;color:#ffc107;font-weight:700;">${growth_training} / 5</td></tr>
+            <tr><td style="padding:8px;color:#a0b4cc;">Communication</td><td style="padding:8px;color:#ffc107;font-weight:700;">${sup_communication} / 5</td></tr>
+            <tr><td style="padding:8px;color:#a0b4cc;">Support</td><td style="padding:8px;color:#ffc107;font-weight:700;">${sup_support} / 5</td></tr>
+            <tr><td style="padding:8px;color:#a0b4cc;">Fairness</td><td style="padding:8px;color:#ffc107;font-weight:700;">${sup_fairness} / 5</td></tr>
+            <tr><td style="padding:8px;color:#a0b4cc;">Teamwork</td><td style="padding:8px;color:#ffc107;font-weight:700;">${team_teamwork} / 5</td></tr>
+            <tr><td style="padding:8px;color:#a0b4cc;">Respect</td><td style="padding:8px;color:#ffc107;font-weight:700;">${team_respect} / 5</td></tr>
           </table>
-          <div style="background:rgba(77,166,255,0.1);border:1px solid rgba(77,166,255,0.3);border-radius:8px;padding:10px;margin-top:12px;text-align:center;"><p style="color:#4da6ff;font-size:13px;font-weight:600;">📌 These are the latest department averages for this month.</p></div>
+          <div style="background:rgba(77,166,255,0.1);border:1px solid rgba(77,166,255,0.3);border-radius:8px;padding:10px;margin-top:12px;text-align:center;"><p style="color:#4da6ff;font-size:13px;font-weight:600;">📌 This is your final rating for this month.</p></div>
           <p style="font-size:12px;color:#4a6a8a;">This is an automated notification from Watan First Digital Feedback System.</p>
         </div>`;
-        for (const sup of supervisors) {
-          sendBrevoEmail(sup.email, `Rating Updated — ${dbUser.department}`, emailHtml);
-        }
+        await sendBrevoEmail(ratedSup.email, 'Rating Updated — Watan First Digital', emailHtml);
+        console.log('[EMAIL] Sent rating to specific supervisor:', ratedSup.email);
       }
     } catch(emailErr) { console.error('[EMAIL] Feedback notify error:', emailErr.message); }
   } catch(e) { console.error('[ERROR] Feedback:', e); res.status(500).json({success:false,message:'Server error.'}); }
