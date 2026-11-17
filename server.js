@@ -872,9 +872,9 @@ app.post('/api/feedback', requireAuth, (req, res) => {
       if (supervisors.length && deptReviews.length) {
         const calcAvg = (arr, f) => { const v = arr.filter(r=>r[f]); return v.length ? (v.reduce((s,r)=>s+r[f],0)/v.length).toFixed(1) : '—'; };
         const emailHtml = `<div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;background:#0a1628;color:#fff;padding:30px;border-radius:12px;">
-          <h2 style="color:#4da6ff;">New Anonymous Feedback Received</h2>
+          <h2 style="color:#4da6ff;">Your Rating Has Been Updated</h2>
           <p style="color:#a0b4cc;">Department: <strong>${dbUser.department}</strong></p>
-          <p style="color:#a0b4cc;">A team member has submitted anonymous feedback. Here are the current department averages:</p>
+          <p style="color:#a0b4cc;">An anonymous rating about you has been submitted or updated. Here are the current department averages:</p>
           <table style="width:100%;border-collapse:collapse;margin:16px 0;">
             <tr><td style="padding:8px;color:#a0b4cc;">Job Satisfaction</td><td style="padding:8px;color:#ffc107;font-weight:700;">${calcAvg(deptReviews,'job_satisfaction')} / 5</td></tr>
             <tr><td style="padding:8px;color:#a0b4cc;">Salary & Benefits</td><td style="padding:8px;color:#ffc107;font-weight:700;">${calcAvg(deptReviews,'salary_benefits')} / 5</td></tr>
@@ -889,7 +889,7 @@ app.post('/api/feedback', requireAuth, (req, res) => {
           <p style="font-size:12px;color:#4a6a8a;">This is an automated notification from Watan First Digital Feedback System.</p>
         </div>`;
         for (const sup of supervisors) {
-          sendBrevoEmail(sup.email, `New Anonymous Feedback — ${dbUser.department}`, emailHtml);
+          sendBrevoEmail(sup.email, `Rating Updated — ${dbUser.department}`, emailHtml);
         }
       }
     } catch(emailErr) { console.error('[EMAIL] Feedback notify error:', emailErr.message); }
@@ -928,8 +928,8 @@ app.post('/api/supervisor-review', requireAuth, (req, res) => {
         if (!emp) continue;
         const starRow = (label, val) => `<tr><td style="padding:8px;color:#a0b4cc;">${label}</td><td style="padding:8px;color:#ffc107;font-weight:700;">${'★'.repeat(val||0)}${'☆'.repeat(5-(val||0))} (${val}/5)</td></tr>`;
         const emailHtml = `<div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;background:#0a1628;color:#fff;padding:30px;border-radius:12px;">
-          <h2 style="color:#4da6ff;">Your Supervisor Has Rated You</h2>
-          <p style="color:#a0b4cc;">Hello <strong>${emp.full_name}</strong>, your supervisor has submitted new ratings for you.</p>
+          <h2 style="color:#4da6ff;">Your Rating Has Been Updated</h2>
+          <p style="color:#a0b4cc;">Hello <strong>${emp.full_name}</strong>, your supervisor has submitted or updated your ratings.</p>
           <table style="width:100%;border-collapse:collapse;margin:16px 0;">
             ${starRow('Performance', r.emp_performance)}
             ${starRow('Punctuality', r.emp_punctuality)}
@@ -941,7 +941,7 @@ app.post('/api/supervisor-review', requireAuth, (req, res) => {
           <div style="background:rgba(77,166,255,0.1);border:1px solid rgba(77,166,255,0.3);border-radius:8px;padding:10px;margin-top:12px;text-align:center;"><p style="color:#4da6ff;font-size:13px;font-weight:600;">📌 This is your final rating for this month.</p></div>
           <p style="font-size:12px;color:#4a6a8a;">This is an automated notification from Watan First Digital Feedback System.</p>
         </div>`;
-        sendBrevoEmail(emp.email, 'New Supervisor Rating — Watan First Digital', emailHtml);
+        sendBrevoEmail(emp.email, 'Rating Updated — Watan First Digital', emailHtml);
       }
     } catch(emailErr) { console.error('[EMAIL] Sup review notify error:', emailErr.message); }
   } catch(e) { console.error('[ERROR] Sup review:', e); res.status(500).json({success:false,message:'Server error.'}); }
