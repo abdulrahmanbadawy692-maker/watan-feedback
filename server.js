@@ -823,18 +823,22 @@ app.delete('/api/feedback/delete-mine', requireAuth, async (req, res) => {
     // Email the rated person that their rating was removed
     try {
       const dbUser = getUserById.get(user.id);
-      if (existing.reviewer_role === 'employee' && existing.target_id) {
-        // Employee deleted their supervisor rating
-        const sup = getUserById.get(existing.target_id);
-        if (sup) {
-          const emailHtml = `<div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;background:#0a1628;color:#fff;padding:30px;border-radius:12px;">
-            <h2 style="color:#4da6ff;">Rating Removed</h2>
-            <p style="color:#a0b4cc;">Hello <strong>${sup.full_name}</strong>,</p>
-            <p style="color:#a0b4cc;">An anonymous rating about you in the <strong>${existing.department}</strong> department has been removed from the system.</p>
-            <p style="color:#a0b4cc;font-size:13px;">The employee may submit a new rating. Check your dashboard for the latest results.</p>
-            <p style="font-size:12px;color:#4a6a8a;">Watan First Digital Feedback System</p>
-          </div>`;
-          sendBrevoEmail(sup.email, 'Rating Removed — Watan First Digital', emailHtml);
+      if (existing.reviewer_role === 'employee') {
+        // Employee deleted their supervisor rating — notify the specific supervisor or all dept supervisors
+        const supEmailHtml = (name) => `<div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;background:#0a1628;color:#fff;padding:30px;border-radius:12px;">
+          <h2 style="color:#4da6ff;">Rating Removed</h2>
+          <p style="color:#a0b4cc;">Hello <strong>${name}</strong>,</p>
+          <p style="color:#a0b4cc;">An anonymous rating about you in the <strong>${existing.department}</strong> department has been removed from the system.</p>
+          <p style="color:#a0b4cc;font-size:13px;">The employee may submit a new rating. Check your dashboard for the latest results.</p>
+          <p style="font-size:12px;color:#4a6a8a;">Watan First Digital Feedback System</p>
+        </div>`;
+        if (existing.target_id) {
+          const sup = getUserById.get(existing.target_id);
+          if (sup) sendBrevoEmail(sup.email, 'Rating Removed — Watan First Digital', supEmailHtml(sup.full_name));
+        } else {
+          // Old rating without target_id — notify all supervisors in department
+          const sups = db.prepare("SELECT * FROM fb_users WHERE department=? AND role='supervisor' AND is_admin=0").all(existing.department);
+          for (const sup of sups) { sendBrevoEmail(sup.email, 'Rating Removed — Watan First Digital', supEmailHtml(sup.full_name)); }
         }
       } else if (existing.reviewer_role === 'supervisor' && existing.target_id) {
         // Supervisor deleted their employee rating
