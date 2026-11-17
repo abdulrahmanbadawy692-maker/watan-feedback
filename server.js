@@ -319,7 +319,7 @@ function headerHTML(user) {
     </a>
     <div class="header-nav">
       <a href="/dashboard" data-en="📊 Dashboard" data-ar="📊 لوحة التحكم">📊 Dashboard</a>
-      <a href="/change-password" data-en="🔑 Password" data-ar="🔑 كلمة المرور">🔑 Password</a>
+      <a href="/profile" data-en="👤 Profile" data-ar="👤 الملف">👤 Profile</a>
       ${langToggleBtn()} ${darkToggleBtn()}
       <a href="/logout" style="border-color:rgba(220,53,69,0.3);color:#ff6b7a;" data-en="Logout" data-ar="خروج">Logout</a>
     </div>
@@ -578,6 +578,31 @@ app.get('/dashboard', requireAuth, (req, res) => {
         </div>`).join('')
       }
     </div>
+    <!-- Rating History Chart -->
+    ${myRatings.length >= 1 ? `<div class="card" style="margin-top:20px;">
+      <h2 class="section-title" data-en="📊 Rating History" data-ar="📊 سجل التقييمات">📊 Rating History</h2>
+      ${isSuper ? (() => {
+        const fields = [{k:'sup_communication',en:'Communication'},{k:'sup_support',en:'Support'},{k:'sup_fairness',en:'Fairness'}];
+        const avgCalc = (f) => { const v=myRatings.filter(r=>r[f]); return v.length?(v.reduce((s,r)=>s+r[f],0)/v.length):0; };
+        return `<div style="display:flex;flex-direction:column;gap:10px;">
+          ${fields.map(f => { const val=avgCalc(f.k).toFixed(1); const pct=Math.round(avgCalc(f.k)*20); return `<div>
+            <div style="display:flex;justify-content:space-between;margin-bottom:4px;"><span style="font-size:12px;color:#a0b4cc;">${f.en}</span><span style="font-size:12px;font-weight:700;color:#ffc107;">${val}/5</span></div>
+            <div style="height:8px;background:#0f2035;border-radius:4px;overflow:hidden;"><div style="height:100%;width:${pct}%;background:linear-gradient(90deg,${pct<40?'#dc3545':pct<70?'#ffc107':'#4ade80'},${pct<40?'#ff6b7a':pct<70?'#ffd43b':'#28a745'});border-radius:4px;transition:width .5s;"></div></div>
+          </div>`; }).join('')}
+        </div>`;
+      })() : (() => {
+        const fields = [{k:'emp_performance',en:'Performance'},{k:'emp_punctuality',en:'Punctuality'},{k:'emp_attitude',en:'Attitude'},{k:'emp_initiative',en:'Initiative'}];
+        const avgCalc = (f) => { const v=myRatings.filter(r=>r[f]); return v.length?(v.reduce((s,r)=>s+r[f],0)/v.length):0; };
+        return `<div style="display:flex;flex-direction:column;gap:10px;">
+          ${fields.map(f => { const val=avgCalc(f.k).toFixed(1); const pct=Math.round(avgCalc(f.k)*20); return `<div>
+            <div style="display:flex;justify-content:space-between;margin-bottom:4px;"><span style="font-size:12px;color:#a0b4cc;">${f.en}</span><span style="font-size:12px;font-weight:700;color:#ffc107;">${val}/5</span></div>
+            <div style="height:8px;background:#0f2035;border-radius:4px;overflow:hidden;"><div style="height:100%;width:${pct}%;background:linear-gradient(90deg,${pct<40?'#dc3545':pct<70?'#ffc107':'#4ade80'},${pct<40?'#ff6b7a':pct<70?'#ffd43b':'#28a745'});border-radius:4px;transition:width .5s;"></div></div>
+          </div>`; }).join('')}
+        </div>`;
+      })()}
+      <p style="text-align:center;color:#4a6a8a;font-size:11px;margin-top:12px;">${myRatings.length} rating(s) total</p>
+    </div>` : ''}
+
     <!-- My Past Submissions (visible only to the user themselves) -->
     <div class="card" style="margin-top:20px;">
       <h2 class="section-title" data-en="📋 My Past Submissions" data-ar="📋 تقييماتي السابقة">📋 My Past Submissions</h2>
@@ -688,6 +713,46 @@ app.get('/dashboard', requireAuth, (req, res) => {
     catch(e){wfdAlert('Network error.','error');}
   }
   </script></body></html>`);
+});
+
+// ── PROFILE PAGE ──────────────────────────────────────────
+app.get('/profile', requireAuth, (req, res) => {
+  const user = req.session.user;
+  const dbUser = getUserById.get(user.id);
+  const totalRatings = db.prepare('SELECT COUNT(*) as c FROM fb_reviews WHERE reviewer_id=?').get(user.id).c;
+  const ratingsAboutMe = db.prepare('SELECT COUNT(*) as c FROM fb_reviews WHERE target_id=?').get(user.id).c;
+  res.send(`${pageHead('My Profile')}
+  <body>
+  ${headerHTML(user)}
+  <div class="container" style="max-width:500px;">
+    <h1 class="page-title" data-en="👤 My Profile" data-ar="👤 ملفي الشخصي">👤 My Profile</h1>
+    <div class="card" style="text-align:center;">
+      <div style="width:80px;height:80px;border-radius:50%;background:linear-gradient(135deg,#4da6ff,#2b8fef);display:flex;align-items:center;justify-content:center;margin:0 auto 16px;font-size:32px;color:#fff;font-weight:700;">${escapeHtml(dbUser.full_name.charAt(0).toUpperCase())}</div>
+      <h2 style="font-size:22px;margin-bottom:4px;">${escapeHtml(dbUser.full_name)}</h2>
+      <p style="color:#a0b4cc;font-size:14px;margin-bottom:20px;">${escapeHtml(dbUser.email)}</p>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;text-align:center;">
+        <div style="background:rgba(77,166,255,0.08);border-radius:10px;padding:14px;">
+          <p style="font-size:12px;color:#a0b4cc;" data-en="Role" data-ar="الدور">Role</p>
+          <p style="font-size:16px;font-weight:700;color:${dbUser.role==='supervisor'?'#b08aef':'#4da6ff'};text-transform:capitalize;">${escapeHtml(dbUser.role)}</p>
+        </div>
+        <div style="background:rgba(77,166,255,0.08);border-radius:10px;padding:14px;">
+          <p style="font-size:12px;color:#a0b4cc;" data-en="Department" data-ar="القسم">Department</p>
+          <p style="font-size:16px;font-weight:700;color:#fff;">${escapeHtml(dbUser.department)}</p>
+        </div>
+        <div style="background:rgba(77,166,255,0.08);border-radius:10px;padding:14px;">
+          <p style="font-size:12px;color:#a0b4cc;" data-en="Ratings Given" data-ar="تقييمات أرسلتها">Ratings Given</p>
+          <p style="font-size:16px;font-weight:700;color:#ffc107;">${totalRatings}</p>
+        </div>
+        <div style="background:rgba(77,166,255,0.08);border-radius:10px;padding:14px;">
+          <p style="font-size:12px;color:#a0b4cc;" data-en="Ratings Received" data-ar="تقييمات استلمتها">Ratings Received</p>
+          <p style="font-size:16px;font-weight:700;color:#4ade80;">${ratingsAboutMe}</p>
+        </div>
+      </div>
+      <a href="/change-password" class="btn" style="margin-top:20px;display:inline-block;text-decoration:none;" data-en="🔑 Change Password" data-ar="🔑 تغيير كلمة المرور">🔑 Change Password</a>
+    </div>
+  </div>
+  ${footerHTML()}
+  </body></html>`);
 });
 
 // ── CHANGE PASSWORD ────────────────────────────────────────
@@ -1190,8 +1255,9 @@ app.get('/admin/manage', requireAdmin, (req, res) => {
     <!-- User List -->
     <div class="card">
       <h2 class="section-title" data-en="👥 All Users (${allUsers.length})" data-ar="👥 جميع المستخدمين (${allUsers.length})">👥 All Users (${allUsers.length})</h2>
+      <div style="margin-bottom:16px;"><input type="text" id="userSearch" oninput="filterUsers()" placeholder="🔍 Search by name or email..." style="width:100%;padding:10px 14px;font-size:14px;color:#fff;background:#0f2035;border:1.5px solid rgba(77,166,255,0.2);border-radius:8px;font-family:inherit;"></div>
       ${allUsers.length===0?'<p style="text-align:center;color:#a0b4cc;">No users yet. Add employees above.</p>':
-        allUsers.map(u => `<div class="emp-card" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;">
+        allUsers.map(u => `<div class="emp-card user-row" data-name="${escapeHtml(u.full_name.toLowerCase())}" data-email="${escapeHtml(u.email.toLowerCase())}" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;">
           <div>
             <h3 style="font-size:15px;">${escapeHtml(u.full_name)}</h3>
             <span style="font-size:12px;color:#a0b4cc;">${escapeHtml(u.email)}</span>
@@ -1215,6 +1281,7 @@ app.get('/admin/manage', requireAdmin, (req, res) => {
   ${eyeToggleScript()}
   <script>
   function wfdAlert(msg,type,cb){var ic=type==='success'?'✅':type==='error'?'❌':'ℹ️';var cl=type==='success'?'#28a745':type==='error'?'#dc3545':'#4da6ff';var t=document.createElement('div');t.style.cssText='position:fixed;top:20px;left:50%;transform:translateX(-50%);z-index:99999;background:#132a45;border:1px solid '+cl+';border-radius:12px;padding:14px 24px;display:flex;align-items:center;gap:12px;box-shadow:0 8px 30px rgba(0,0,0,0.4);max-width:500px;width:90%;';t.innerHTML='<span style="font-size:24px;flex-shrink:0;">'+ic+'</span><p style="font-size:14px;color:#fff;line-height:1.4;flex:1;">'+msg+'</p><button style="padding:6px 16px;background:'+cl+';color:#fff;border:none;border-radius:6px;font-size:12px;font-weight:600;cursor:pointer;font-family:inherit;flex-shrink:0;">OK</button>';t.querySelector('button').onclick=function(){t.remove();if(cb)cb();};document.body.appendChild(t);if(!cb)setTimeout(function(){if(t.parentNode)t.remove();},4000);}
+  function filterUsers(){var q=document.getElementById('userSearch').value.toLowerCase();document.querySelectorAll('.user-row').forEach(function(el){var n=el.getAttribute('data-name')||'';var e=el.getAttribute('data-email')||'';el.style.display=(n.includes(q)||e.includes(q))?'flex':'none';});}
   async function addUser(){var n=document.getElementById('aName').value.trim(),e=document.getElementById('aEmailAdd').value.trim(),p=document.getElementById('aPassAdd').value,d=document.getElementById('aDept').value,r=document.getElementById('aRole').value;
     if(!n||!e||!p){wfdAlert('All fields required.','error');return;}
     try{var res=await fetch('/api/admin/add-user',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:n,email:e,password:p,department:d,role:r})});var data=await res.json();
