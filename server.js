@@ -399,7 +399,7 @@ app.get('/dashboard', requireAuth, (req, res) => {
   const now = new Date();
   const monthStart = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-01`;
 
-  // Get who this user can rate (same department)
+  // Get who this user can rate (same department, opposite role)
   let rateTargets = [];
   if (isSuper) {
     rateTargets = db.prepare('SELECT * FROM fb_users WHERE department=? AND role=\'employee\' AND is_admin=0').all(dbUser.department);
@@ -407,13 +407,16 @@ app.get('/dashboard', requireAuth, (req, res) => {
     rateTargets = db.prepare('SELECT * FROM fb_users WHERE department=? AND role=\'supervisor\' AND is_admin=0').all(dbUser.department);
   }
 
-  // Check which targets already rated this month (with 24h delete window per rating)
-  const ratedThisMonth = db.prepare('SELECT target_id,id,created_at FROM fb_reviews WHERE reviewer_id=? AND created_at>=?').all(user.id, monthStart);
-  const ratedIds = ratedThisMonth.map(r => r.target_id);
+  // Check which person-targets already rated this month
+  const personRatingsThisMonth = db.prepare('SELECT target_id,id,created_at FROM fb_reviews WHERE reviewer_id=? AND target_type!=\'company\' AND target_id IS NOT NULL AND created_at>=?').all(user.id, monthStart);
+  const ratedIds = personRatingsThisMonth.map(r => r.target_id);
   const unratedTargets = rateTargets.filter(t => !ratedIds.includes(t.id));
 
-  // Build rated list with delete eligibility per person
-  const ratedWithInfo = ratedThisMonth.filter(r => r.target_id).map(r => {
+  // Check if company rating submitted this month (employees only)
+  const companyRatingThisMonth = !isSuper ? db.prepare('SELECT id,created_at FROM fb_reviews WHERE reviewer_id=? AND target_type=\'company\' AND created_at>=?').get(user.id, monthStart) : null;
+
+  // Build rated-persons list with delete eligibility
+  const ratedWithInfo = personRatingsThisMonth.filter(r => r.target_id).map(r => {
     const target = getUserById.get(r.target_id);
     const ca = r.created_at || '';
     const submittedAt = new Date(ca.includes('Z') || ca.includes('+') ? ca : ca + 'Z');
@@ -421,7 +424,19 @@ app.get('/dashboard', requireAuth, (req, res) => {
     return { reviewId: r.id, targetId: r.target_id, name: target ? target.full_name : 'Unknown', canDelete: hoursSince <= 24 };
   });
 
-  // Get ratings about this user (from supervisors if employee, from employees if supervisor)
+  // Company rating delete eligibility
+  let companyCanDelete = false;
+  if (companyRatingThisMonth) {
+    const ca = companyRatingThisMonth.created_at || '';
+    const submittedAt = new Date(ca.includes('Z') || ca.includes('+') ? ca : ca + 'Z');
+    const hoursSince = isNaN(submittedAt.getTime()) ? 999 : (now.getTime() - submittedAt.getTime()) / (1000 * 60 * 60);
+    companyCanDelete = hoursSince <= 24;
+  }
+
+  // All ratings this month (for top status)
+  const allRatedThisMonth = db.prepare('SELECT id FROM fb_reviews WHERE reviewer_id=? AND created_at>=?').all(user.id, monthStart);
+
+  // Get ratings about this user
   let myRatings = [];
   if (isSuper) {
     myRatings = db.prepare('SELECT * FROM fb_reviews WHERE target_type=\'supervisor\' AND target_id=? ORDER BY created_at DESC').all(user.id);
@@ -429,11 +444,8 @@ app.get('/dashboard', requireAuth, (req, res) => {
     myRatings = db.prepare('SELECT * FROM fb_reviews WHERE target_type=\'employee\' AND target_id=? ORDER BY created_at DESC').all(user.id);
   }
 
-  // Get user's own past submissions (visible only to them — still anonymous to HR)
+  // Get user's own past submissions
   const mySubmissions = db.prepare('SELECT * FROM fb_reviews WHERE reviewer_id=? ORDER BY created_at DESC').all(user.id);
-
-  // Keep teamMembers for backward compat
-  let teamMembers = rateTargets;
 
   res.send(`${pageHead('Dashboard')}
   <body>
@@ -452,7 +464,7 @@ app.get('/dashboard', requireAuth, (req, res) => {
       </div>
       <div style="flex:1;min-width:150px;background:#132a45;border:1px solid rgba(77,166,255,0.2);border-radius:12px;padding:16px;text-align:center;">
         <p style="font-size:12px;color:#a0b4cc;" data-en="This Month" data-ar="هذا الشهر">This Month</p>
-        <p style="font-size:18px;font-weight:700;color:${ratedThisMonth.length>0?'#4ade80':'#ffc107'};">${ratedThisMonth.length>0?'Submitted ✅':'Not yet'}</p>
+        <p style="font-size:18px;font-weight:700;color:${allRatedThisMonth.length>0?'#4ade80':'#ffc107'};">${allRatedThisMonth.length>0?'Submitted ✅':'Not yet'}</p>
       </div>
     </div>
 
@@ -464,75 +476,131 @@ app.get('/dashboard', requireAuth, (req, res) => {
 
     <!-- TAB 1: Give Feedback / Rate Team -->
     <div id="tab-give">
-    <div class="card">
-      <h2 class="section-title" data-en="${isSuper?'📝 Rate Your Team Members':'📝 Submit Anonymous Feedback'}" data-ar="${isSuper?'📝 قيّم أعضاء فريقك':'📝 أرسل تقييمك المجهول'}">${isSuper?'📝 Rate Your Team Members':'📝 Submit Anonymous Feedback'}</h2>
 
-      ${unratedTargets.length === 0 && ratedThisMonth.length > 0 ? `<div style="text-align:center;padding:20px;"><p style="color:#4ade80;font-size:16px;font-weight:600;" data-en="✅ You have rated all ${isSuper?'employees':'supervisors'} this month" data-ar="✅ لقد قيّمت جميع ${isSuper?'الموظفين':'المشرفين'} هذا الشهر">✅ You have rated all ${isSuper?'employees':'supervisors'} this month</p><p style="color:#a0b4cc;font-size:13px;margin-top:8px;" data-en="You can submit again next month. Delete a rating below to re-rate." data-ar="يمكنك الإرسال مرة أخرى الشهر القادم. احذف تقييم أدناه لإعادة التقييم.">You can submit again next month. Delete a rating below to re-rate.</p><div style="display:flex;flex-wrap:wrap;gap:6px;justify-content:center;margin-top:12px;">${ratedWithInfo.map(r => `<div style="display:inline-flex;align-items:center;gap:6px;background:rgba(74,222,128,0.1);border:1px solid rgba(74,222,128,0.3);border-radius:20px;padding:4px 12px;"><span style="font-size:12px;color:#4ade80;">✅ ${escapeHtml(r.name)}</span>${r.canDelete ? `<button onclick="deleteRating('${r.reviewId}','${escapeHtml(r.name)}')" style="background:none;border:none;color:#ff6b7a;cursor:pointer;font-size:12px;padding:0 2px;" title="Delete rating">🗑️</button>` : ''}</div>`).join('')}</div></div>` : `
+    ${!isSuper ? `
+    <!-- ═══════ CARD 1: COMPANY RATING (Employees Only) ═══════ -->
+    <div class="card" style="border-left:4px solid #4da6ff;">
+      <h2 class="section-title" style="display:flex;align-items:center;gap:10px;">
+        <span style="font-size:24px;">🏢</span>
+        <span data-en="Company Rating" data-ar="تقييم الشركة">Company Rating</span>
+      </h2>
+      <p style="font-size:13px;color:#a0b4cc;margin-bottom:16px;" data-en="Rate your overall experience at the company. This is NOT about a specific person." data-ar="قيّم تجربتك العامة في الشركة. هذا ليس عن شخص محدد.">Rate your overall experience at the company. This is NOT about a specific person.</p>
 
-      ${rateTargets.length === 0 ? '<p style="color:#a0b4cc;text-align:center;padding:20px;" data-en="No one to rate in your department." data-ar="لا يوجد أحد لتقييمه في قسمك.">No one to rate in your department.</p>' : `
-
-      <!-- Select who to rate -->
-      <div class="form-group" style="margin-bottom:20px;">
-        <label style="font-size:15px;font-weight:700;color:#4da6ff;" data-en="${isSuper?'Select Employee to Rate':'Select Supervisor to Rate'}" data-ar="${isSuper?'اختر الموظف لتقييمه':'اختر المشرف لتقييمه'}">${isSuper?'Select Employee to Rate':'Select Supervisor to Rate'}</label>
-        <select id="rateTarget" onchange="showRatingForm()" style="width:100%;padding:12px;font-size:14px;color:#fff;background:#0f2035;border:1.5px solid rgba(77,166,255,0.2);border-radius:8px;font-family:inherit;margin-top:8px;">
-          <option value="" data-en="— Choose —" data-ar="— اختر —">— Choose —</option>
-          ${unratedTargets.map(t => `<option value="${t.id}">${escapeHtml(t.full_name)} (${escapeHtml(t.department)})</option>`).join('')}
-        </select>
-        ${ratedWithInfo.length > 0 ? `<div style="margin-top:10px;"><p style="font-size:12px;color:#4ade80;margin-bottom:6px;" data-en="Already rated this month:" data-ar="تم تقييمهم هذا الشهر:">Already rated this month:</p><div style="display:flex;flex-wrap:wrap;gap:6px;">${ratedWithInfo.map(r => `<div style="display:inline-flex;align-items:center;gap:6px;background:rgba(74,222,128,0.1);border:1px solid rgba(74,222,128,0.3);border-radius:20px;padding:4px 12px;"><span style="font-size:12px;color:#4ade80;">✅ ${escapeHtml(r.name)}</span>${r.canDelete ? `<button onclick="deleteRating('${r.reviewId}','${escapeHtml(r.name)}')" style="background:none;border:none;color:#ff6b7a;cursor:pointer;font-size:12px;padding:0 2px;" title="Delete rating">🗑️</button>` : ''}</div>`).join('')}</div></div>` : ''}
-      </div>
-
-      <!-- Rating form (hidden until selection) -->
-      <div id="ratingFormArea" style="display:none;">
-
-      ${!isSuper ? `
-      <div class="trust-banner">
-        <p data-en="🔒 Your feedback is 100% anonymous. Be honest — your name will never be shown." data-ar="🔒 تقييمك مجهول تماماً. كن صادقاً — لن يظهر اسمك أبداً.">🔒 Your feedback is 100% anonymous. Be honest — your name will never be shown.</p>
-        <span data-en="Your honest opinion helps make the company better for everyone." data-ar="رأيك الصادق يساعد في تحسين الشركة للجميع.">Your honest opinion helps make the company better for everyone.</span>
-      </div>
-
-      <div style="display:flex;gap:12px;flex-wrap:wrap;justify-content:center;margin-bottom:16px;padding:10px;background:rgba(77,166,255,0.05);border-radius:8px;">
-        <span style="font-size:11px;color:#dc3545;">★ <span data-en="Bad" data-ar="سيء">Bad</span></span>
-        <span style="font-size:11px;color:#ff6b7a;">★★ <span data-en="Poor" data-ar="ضعيف">Poor</span></span>
-        <span style="font-size:11px;color:#ffc107;">★★★ <span data-en="Good" data-ar="جيد">Good</span></span>
-        <span style="font-size:11px;color:#4da6ff;">★★★★ <span data-en="Very Good" data-ar="جيد جداً">Very Good</span></span>
-        <span style="font-size:11px;color:#4ade80;">★★★★★ <span data-en="Excellent" data-ar="ممتاز">Excellent</span></span>
-      </div>
-      <h3 style="font-size:16px;color:#4da6ff;margin-bottom:12px;" data-en="Section 1: Your Job" data-ar="القسم ١: وظيفتك">Section 1: Your Job</h3>
-      ${starsHTML('job_satisfaction','How happy are you with your daily tasks?','ما مدى رضاك عن مهامك اليومية؟')}
-      ${starsHTML('salary_benefits','How fair is your compensation?','ما مدى عدالة تعويضاتك؟')}
-      ${starsHTML('growth_training','Do you have opportunities to develop your skills?','هل لديك فرص لتطوير مهاراتك؟')}
-
-      <h3 style="font-size:16px;color:#4da6ff;margin:20px 0 12px;" data-en="Section 2: Your Supervisor" data-ar="القسم ٢: مشرفك">Section 2: Your Supervisor</h3>
-      ${starsHTML('sup_communication','Does your supervisor communicate clearly?','هل يتواصل مشرفك بوضوح؟')}
-      ${starsHTML('sup_support','Does your supervisor help when you face problems?','هل يساعدك مشرفك عند مواجهة المشاكل؟')}
-      ${starsHTML('sup_fairness','Does your supervisor treat everyone equally?','هل يعامل مشرفك الجميع بعدالة؟')}
-
-      <h3 style="font-size:16px;color:#4da6ff;margin:20px 0 12px;" data-en="Section 3: Your Team" data-ar="القسم ٣: فريقك">Section 3: Your Team</h3>
-      ${starsHTML('team_teamwork','Does your team cooperate and work well together?','هل يتعاون فريقك ويعمل بشكل جيد معاً؟')}
-      ${starsHTML('team_respect','Do your colleagues treat each other with respect?','هل يتعامل زملاؤك مع بعضهم باحترام؟')}
-
-      <div class="form-group" style="margin-top:20px;">
-        <label data-en="💬 What would you change to make the company better? (optional)" data-ar="💬 ما الذي تغيره لتحسين الشركة؟ (اختياري)">💬 What would you change to make the company better? (optional)</label>
-        <textarea id="comment" placeholder="Your suggestions..."></textarea>
-      </div>
-      <button class="btn btn-full" onclick="submitFeedback()" data-en="Submit Anonymous Feedback" data-ar="إرسال التقييم المجهول">Submit Anonymous Feedback</button>
+      ${companyRatingThisMonth ? `
+        <div style="text-align:center;padding:20px;background:rgba(74,222,128,0.06);border-radius:12px;">
+          <p style="color:#4ade80;font-size:16px;font-weight:600;" data-en="✅ Company rating submitted this month" data-ar="✅ تم إرسال تقييم الشركة هذا الشهر">✅ Company rating submitted this month</p>
+          <p style="color:#a0b4cc;font-size:13px;margin-top:6px;" data-en="You can submit again next month." data-ar="يمكنك الإرسال مرة أخرى الشهر القادم.">You can submit again next month.</p>
+          ${companyCanDelete ? `<button onclick="deleteRating('${companyRatingThisMonth.id}','Company Rating')" style="margin-top:10px;padding:6px 16px;background:rgba(220,53,69,0.1);border:1px solid rgba(220,53,69,0.3);border-radius:8px;color:#ff6b7a;cursor:pointer;font-size:12px;font-weight:600;font-family:inherit;" data-en="🗑️ Delete & Re-submit" data-ar="🗑️ حذف وإعادة إرسال">🗑️ Delete & Re-submit</button>` : ''}
+        </div>
       ` : `
-      <!-- Supervisor rates one employee at a time -->
-      ${starsHTML('emp_performance','Performance — How well does this employee do their job?','الأداء — ما مدى جودة أداء هذا الموظف؟')}
-      ${starsHTML('emp_punctuality','Punctuality — Does this employee arrive on time and meet deadlines?','الالتزام — هل يصل هذا الموظف في الوقت ويلتزم بالمواعيد؟')}
-      ${starsHTML('emp_attitude','Attitude — Is this employee positive and professional?','السلوك — هل هذا الموظف إيجابي ومهني؟')}
-      ${starsHTML('emp_initiative','Initiative — Does this employee take action without being asked?','المبادرة — هل يتخذ هذا الموظف إجراءات دون أن يُطلب منه؟')}
-      <div class="form-group" style="margin-top:12px;">
-        <label data-en="💬 Written feedback (visible to employee)" data-ar="💬 تقييم مكتوب (مرئي للموظف)">💬 Written feedback (visible to employee)</label>
-        <textarea id="sup_comment" placeholder="Your feedback..."></textarea>
-      </div>
-      <button class="btn btn-full" onclick="submitSupReview()" data-en="Submit Rating" data-ar="إرسال التقييم">Submit Rating</button>
-      `}
+        <div class="trust-banner">
+          <p data-en="🔒 Your feedback is 100% anonymous. Be honest — your name will never be shown." data-ar="🔒 تقييمك مجهول تماماً. كن صادقاً — لن يظهر اسمك أبداً.">🔒 Your feedback is 100% anonymous. Be honest — your name will never be shown.</p>
+        </div>
 
-      </div><!-- end ratingFormArea -->
-      `}
+        <div style="display:flex;gap:12px;flex-wrap:wrap;justify-content:center;margin-bottom:16px;padding:10px;background:rgba(77,166,255,0.05);border-radius:8px;">
+          <span style="font-size:11px;color:#dc3545;">★ <span data-en="Bad" data-ar="سيء">Bad</span></span>
+          <span style="font-size:11px;color:#ff6b7a;">★★ <span data-en="Poor" data-ar="ضعيف">Poor</span></span>
+          <span style="font-size:11px;color:#ffc107;">★★★ <span data-en="Good" data-ar="جيد">Good</span></span>
+          <span style="font-size:11px;color:#4da6ff;">★★★★ <span data-en="Very Good" data-ar="جيد جداً">Very Good</span></span>
+          <span style="font-size:11px;color:#4ade80;">★★★★★ <span data-en="Excellent" data-ar="ممتاز">Excellent</span></span>
+        </div>
+
+        ${starsHTML('job_satisfaction','How happy are you with your daily tasks?','ما مدى رضاك عن مهامك اليومية؟')}
+        ${starsHTML('salary_benefits','How fair is your compensation?','ما مدى عدالة تعويضاتك؟')}
+        ${starsHTML('growth_training','Do you have opportunities to develop your skills?','هل لديك فرص لتطوير مهاراتك؟')}
+        ${starsHTML('team_teamwork','Does your team cooperate and work well together?','هل يتعاون فريقك ويعمل بشكل جيد معاً؟')}
+        ${starsHTML('team_respect','Do your colleagues treat each other with respect?','هل يتعامل زملاؤك مع بعضهم باحترام؟')}
+
+        <div class="form-group" style="margin-top:20px;">
+          <label data-en="💬 What would you change to make the company better? (optional)" data-ar="💬 ما الذي تغيره لتحسين الشركة؟ (اختياري)">💬 What would you change to make the company better? (optional)</label>
+          <textarea id="company_comment" placeholder="Your suggestions..."></textarea>
+        </div>
+        <button class="btn btn-full" onclick="submitCompanyFeedback()" data-en="Submit Company Rating" data-ar="إرسال تقييم الشركة">Submit Company Rating</button>
       `}
     </div>
+
+    <!-- ═══════ CARD 2: PERSON RATING (Employee → Supervisor) ═══════ -->
+    <div class="card" style="margin-top:20px;border-left:4px solid #b08aef;">
+      <h2 class="section-title" style="display:flex;align-items:center;gap:10px;">
+        <span style="font-size:24px;">👤</span>
+        <span data-en="Supervisor Rating" data-ar="تقييم المشرف">Supervisor Rating</span>
+      </h2>
+      <p style="font-size:13px;color:#a0b4cc;margin-bottom:16px;" data-en="Rate a specific supervisor. You can rate each supervisor once per month." data-ar="قيّم مشرفاً محدداً. يمكنك تقييم كل مشرف مرة واحدة شهرياً.">Rate a specific supervisor. You can rate each supervisor once per month.</p>
+
+      ${unratedTargets.length === 0 && personRatingsThisMonth.length > 0 ? `
+        <div style="text-align:center;padding:20px;background:rgba(74,222,128,0.06);border-radius:12px;">
+          <p style="color:#4ade80;font-size:16px;font-weight:600;" data-en="✅ You have rated all supervisors this month" data-ar="✅ لقد قيّمت جميع المشرفين هذا الشهر">✅ You have rated all supervisors this month</p>
+          <p style="color:#a0b4cc;font-size:13px;margin-top:8px;" data-en="Delete a rating below to re-rate." data-ar="احذف تقييم أدناه لإعادة التقييم.">Delete a rating below to re-rate.</p>
+          <div style="display:flex;flex-wrap:wrap;gap:6px;justify-content:center;margin-top:12px;">
+            ${ratedWithInfo.map(r => `<div style="display:inline-flex;align-items:center;gap:6px;background:rgba(74,222,128,0.1);border:1px solid rgba(74,222,128,0.3);border-radius:20px;padding:4px 12px;"><span style="font-size:12px;color:#4ade80;">✅ ${escapeHtml(r.name)}</span>${r.canDelete ? `<button onclick="deleteRating('${r.reviewId}','${escapeHtml(r.name)}')" style="background:none;border:none;color:#ff6b7a;cursor:pointer;font-size:12px;padding:0 2px;" title="Delete rating">🗑️</button>` : ''}</div>`).join('')}
+          </div>
+        </div>
+      ` : rateTargets.length === 0 ? `
+        <p style="color:#a0b4cc;text-align:center;padding:20px;" data-en="No supervisors in your department." data-ar="لا يوجد مشرفين في قسمك.">No supervisors in your department.</p>
+      ` : `
+        <div class="form-group" style="margin-bottom:20px;">
+          <label style="font-size:15px;font-weight:700;color:#b08aef;" data-en="Select Supervisor to Rate" data-ar="اختر المشرف لتقييمه">Select Supervisor to Rate</label>
+          <select id="rateTarget" onchange="showRatingForm()" style="width:100%;padding:12px;font-size:14px;color:#fff;background:#0f2035;border:1.5px solid rgba(176,138,239,0.3);border-radius:8px;font-family:inherit;margin-top:8px;">
+            <option value="" data-en="— Choose —" data-ar="— اختر —">— Choose —</option>
+            ${unratedTargets.map(t => `<option value="${t.id}">${escapeHtml(t.full_name)} (${escapeHtml(t.department)})</option>`).join('')}
+          </select>
+          ${ratedWithInfo.length > 0 ? `<div style="margin-top:10px;"><p style="font-size:12px;color:#4ade80;margin-bottom:6px;" data-en="Already rated this month:" data-ar="تم تقييمهم هذا الشهر:">Already rated this month:</p><div style="display:flex;flex-wrap:wrap;gap:6px;">${ratedWithInfo.map(r => `<div style="display:inline-flex;align-items:center;gap:6px;background:rgba(74,222,128,0.1);border:1px solid rgba(74,222,128,0.3);border-radius:20px;padding:4px 12px;"><span style="font-size:12px;color:#4ade80;">✅ ${escapeHtml(r.name)}</span>${r.canDelete ? `<button onclick="deleteRating('${r.reviewId}','${escapeHtml(r.name)}')" style="background:none;border:none;color:#ff6b7a;cursor:pointer;font-size:12px;padding:0 2px;" title="Delete rating">🗑️</button>` : ''}</div>`).join('')}</div></div>` : ''}
+        </div>
+
+        <div id="ratingFormArea" style="display:none;">
+          ${starsHTML('sup_communication','Does this supervisor communicate clearly?','هل يتواصل هذا المشرف بوضوح؟')}
+          ${starsHTML('sup_support','Does this supervisor help when you face problems?','هل يساعدك هذا المشرف عند مواجهة المشاكل؟')}
+          ${starsHTML('sup_fairness','Does this supervisor treat everyone equally?','هل يعامل هذا المشرف الجميع بعدالة؟')}
+          <div class="form-group" style="margin-top:16px;">
+            <label data-en="💬 Additional comments about this supervisor (optional)" data-ar="💬 تعليقات إضافية عن هذا المشرف (اختياري)">💬 Additional comments about this supervisor (optional)</label>
+            <textarea id="person_comment" placeholder="Your feedback..."></textarea>
+          </div>
+          <button class="btn btn-full" style="background:linear-gradient(135deg,#b08aef,#8b5cf6);" onclick="submitPersonFeedback()" data-en="Submit Supervisor Rating" data-ar="إرسال تقييم المشرف">Submit Supervisor Rating</button>
+        </div>
+      `}
+    </div>
+    ` : `
+    <!-- ═══════ SUPERVISOR: Rate Employees ═══════ -->
+    <div class="card" style="border-left:4px solid #b08aef;">
+      <h2 class="section-title" style="display:flex;align-items:center;gap:10px;">
+        <span style="font-size:24px;">👥</span>
+        <span data-en="Rate Your Team Members" data-ar="قيّم أعضاء فريقك">Rate Your Team Members</span>
+      </h2>
+
+      ${unratedTargets.length === 0 && personRatingsThisMonth.length > 0 ? `
+        <div style="text-align:center;padding:20px;background:rgba(74,222,128,0.06);border-radius:12px;">
+          <p style="color:#4ade80;font-size:16px;font-weight:600;" data-en="✅ You have rated all employees this month" data-ar="✅ لقد قيّمت جميع الموظفين هذا الشهر">✅ You have rated all employees this month</p>
+          <p style="color:#a0b4cc;font-size:13px;margin-top:8px;" data-en="Delete a rating below to re-rate." data-ar="احذف تقييم أدناه لإعادة التقييم.">Delete a rating below to re-rate.</p>
+          <div style="display:flex;flex-wrap:wrap;gap:6px;justify-content:center;margin-top:12px;">
+            ${ratedWithInfo.map(r => `<div style="display:inline-flex;align-items:center;gap:6px;background:rgba(74,222,128,0.1);border:1px solid rgba(74,222,128,0.3);border-radius:20px;padding:4px 12px;"><span style="font-size:12px;color:#4ade80;">✅ ${escapeHtml(r.name)}</span>${r.canDelete ? `<button onclick="deleteRating('${r.reviewId}','${escapeHtml(r.name)}')" style="background:none;border:none;color:#ff6b7a;cursor:pointer;font-size:12px;padding:0 2px;" title="Delete rating">🗑️</button>` : ''}</div>`).join('')}
+          </div>
+        </div>
+      ` : rateTargets.length === 0 ? `
+        <p style="color:#a0b4cc;text-align:center;padding:20px;" data-en="No employees in your department." data-ar="لا يوجد موظفين في قسمك.">No employees in your department.</p>
+      ` : `
+        <div class="form-group" style="margin-bottom:20px;">
+          <label style="font-size:15px;font-weight:700;color:#b08aef;" data-en="Select Employee to Rate" data-ar="اختر الموظف لتقييمه">Select Employee to Rate</label>
+          <select id="rateTarget" onchange="showRatingForm()" style="width:100%;padding:12px;font-size:14px;color:#fff;background:#0f2035;border:1.5px solid rgba(176,138,239,0.3);border-radius:8px;font-family:inherit;margin-top:8px;">
+            <option value="" data-en="— Choose —" data-ar="— اختر —">— Choose —</option>
+            ${unratedTargets.map(t => `<option value="${t.id}">${escapeHtml(t.full_name)} (${escapeHtml(t.department)})</option>`).join('')}
+          </select>
+          ${ratedWithInfo.length > 0 ? `<div style="margin-top:10px;"><p style="font-size:12px;color:#4ade80;margin-bottom:6px;" data-en="Already rated this month:" data-ar="تم تقييمهم هذا الشهر:">Already rated this month:</p><div style="display:flex;flex-wrap:wrap;gap:6px;">${ratedWithInfo.map(r => `<div style="display:inline-flex;align-items:center;gap:6px;background:rgba(74,222,128,0.1);border:1px solid rgba(74,222,128,0.3);border-radius:20px;padding:4px 12px;"><span style="font-size:12px;color:#4ade80;">✅ ${escapeHtml(r.name)}</span>${r.canDelete ? `<button onclick="deleteRating('${r.reviewId}','${escapeHtml(r.name)}')" style="background:none;border:none;color:#ff6b7a;cursor:pointer;font-size:12px;padding:0 2px;" title="Delete rating">🗑️</button>` : ''}</div>`).join('')}</div></div>` : ''}
+        </div>
+
+        <div id="ratingFormArea" style="display:none;">
+          ${starsHTML('emp_performance','Performance — How well does this employee do their job?','الأداء — ما مدى جودة أداء هذا الموظف؟')}
+          ${starsHTML('emp_punctuality','Punctuality — Does this employee arrive on time and meet deadlines?','الالتزام — هل يصل هذا الموظف في الوقت ويلتزم بالمواعيد؟')}
+          ${starsHTML('emp_attitude','Attitude — Is this employee positive and professional?','السلوك — هل هذا الموظف إيجابي ومهني؟')}
+          ${starsHTML('emp_initiative','Initiative — Does this employee take action without being asked?','المبادرة — هل يتخذ هذا الموظف إجراءات دون أن يُطلب منه؟')}
+          <div class="form-group" style="margin-top:12px;">
+            <label data-en="💬 Written feedback (visible to employee)" data-ar="💬 تقييم مكتوب (مرئي للموظف)">💬 Written feedback (visible to employee)</label>
+            <textarea id="sup_comment" placeholder="Your feedback..."></textarea>
+          </div>
+          <button class="btn btn-full" style="background:linear-gradient(135deg,#b08aef,#8b5cf6);" onclick="submitSupReview()" data-en="Submit Rating" data-ar="إرسال التقييم">Submit Rating</button>
+        </div>
+      `}
+    </div>
+    `}
 
     </div><!-- end tab-give -->
 
@@ -585,30 +653,37 @@ app.get('/dashboard', requireAuth, (req, res) => {
       <p style="text-align:center;color:#4a6a8a;font-size:11px;margin-top:12px;">${myRatings.length} rating(s) total</p>
     </div>` : ''}
 
-    <!-- My Past Submissions (visible only to the user themselves) -->
+    <!-- My Past Submissions -->
     <div class="card" style="margin-top:20px;">
       <h2 class="section-title" data-en="📋 My Past Submissions" data-ar="📋 تقييماتي السابقة">📋 My Past Submissions</h2>
       <p style="font-size:12px;color:#a0b4cc;margin-bottom:16px;background:rgba(77,166,255,0.06);padding:10px;border-radius:8px;" data-en="🔒 Only you can see this — HR sees anonymous averages, not your individual ratings." data-ar="🔒 أنت فقط تستطيع رؤية هذا — الموارد البشرية ترى المعدلات المجهولة فقط.">🔒 Only you can see this — HR sees anonymous averages, not your individual ratings.</p>
       ${mySubmissions.length === 0 ? `<p style="text-align:center;color:#a0b4cc;padding:20px;" data-en="You haven't submitted any feedback yet." data-ar="لم ترسل أي تقييم بعد.">You haven't submitted any feedback yet.</p>` :
         mySubmissions.map(r => {
           const subDate = fmtDate(r.created_at);
-          if (r.reviewer_role === 'employee') {
-            return `<div class="emp-card"><p style="font-size:12px;color:#a0b4cc;margin-bottom:10px;">${subDate} · <span data-en="Employee Feedback" data-ar="تقييم موظف">Employee Feedback</span></p>
+          if (r.target_type === 'company') {
+            return `<div class="emp-card" style="border-left:3px solid #4da6ff;"><p style="font-size:12px;color:#a0b4cc;margin-bottom:10px;">${subDate} · <span style="color:#4da6ff;font-weight:600;" data-en="🏢 Company Rating" data-ar="🏢 تقييم الشركة">🏢 Company Rating</span></p>
               <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;">
                 <div><span style="font-size:11px;color:#a0b4cc;">Job Satisfaction</span> <span style="color:#ffc107;">${'★'.repeat(r.job_satisfaction||0)}${'☆'.repeat(5-(r.job_satisfaction||0))}</span></div>
                 <div><span style="font-size:11px;color:#a0b4cc;">Salary & Benefits</span> <span style="color:#ffc107;">${'★'.repeat(r.salary_benefits||0)}${'☆'.repeat(5-(r.salary_benefits||0))}</span></div>
                 <div><span style="font-size:11px;color:#a0b4cc;">Growth & Training</span> <span style="color:#ffc107;">${'★'.repeat(r.growth_training||0)}${'☆'.repeat(5-(r.growth_training||0))}</span></div>
-                <div><span style="font-size:11px;color:#a0b4cc;">Sup. Communication</span> <span style="color:#ffc107;">${'★'.repeat(r.sup_communication||0)}${'☆'.repeat(5-(r.sup_communication||0))}</span></div>
-                <div><span style="font-size:11px;color:#a0b4cc;">Sup. Support</span> <span style="color:#ffc107;">${'★'.repeat(r.sup_support||0)}${'☆'.repeat(5-(r.sup_support||0))}</span></div>
-                <div><span style="font-size:11px;color:#a0b4cc;">Sup. Fairness</span> <span style="color:#ffc107;">${'★'.repeat(r.sup_fairness||0)}${'☆'.repeat(5-(r.sup_fairness||0))}</span></div>
                 <div><span style="font-size:11px;color:#a0b4cc;">Teamwork</span> <span style="color:#ffc107;">${'★'.repeat(r.team_teamwork||0)}${'☆'.repeat(5-(r.team_teamwork||0))}</span></div>
                 <div><span style="font-size:11px;color:#a0b4cc;">Respect</span> <span style="color:#ffc107;">${'★'.repeat(r.team_respect||0)}${'☆'.repeat(5-(r.team_respect||0))}</span></div>
               </div>
               ${r.comment?`<p style="margin-top:8px;font-size:13px;color:#a0b4cc;">💬 ${escapeHtml(r.comment)}</p>`:''}
             </div>`;
+          } else if (r.reviewer_role === 'employee') {
+            const tgt = r.target_id ? getUserById.get(r.target_id) : null;
+            return `<div class="emp-card" style="border-left:3px solid #b08aef;"><p style="font-size:12px;color:#a0b4cc;margin-bottom:10px;">${subDate} · <span style="color:#b08aef;font-weight:600;" data-en="👤 Supervisor Rating" data-ar="👤 تقييم المشرف">👤 Supervisor Rating</span>${tgt?' — '+escapeHtml(tgt.full_name):''}</p>
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;">
+                <div><span style="font-size:11px;color:#a0b4cc;">Communication</span> <span style="color:#ffc107;">${'★'.repeat(r.sup_communication||0)}${'☆'.repeat(5-(r.sup_communication||0))}</span></div>
+                <div><span style="font-size:11px;color:#a0b4cc;">Support</span> <span style="color:#ffc107;">${'★'.repeat(r.sup_support||0)}${'☆'.repeat(5-(r.sup_support||0))}</span></div>
+                <div><span style="font-size:11px;color:#a0b4cc;">Fairness</span> <span style="color:#ffc107;">${'★'.repeat(r.sup_fairness||0)}${'☆'.repeat(5-(r.sup_fairness||0))}</span></div>
+              </div>
+              ${r.comment?`<p style="margin-top:8px;font-size:13px;color:#a0b4cc;">💬 ${escapeHtml(r.comment)}</p>`:''}
+            </div>`;
           } else {
-            const tgt = getUserById.get(r.target_id);
-            return `<div class="emp-card"><p style="font-size:12px;color:#a0b4cc;margin-bottom:10px;">${subDate} · <span data-en="Rating for" data-ar="تقييم لـ">Rating for</span> ${tgt?escapeHtml(tgt.full_name):'Employee'}</p>
+            const tgt = r.target_id ? getUserById.get(r.target_id) : null;
+            return `<div class="emp-card" style="border-left:3px solid #b08aef;"><p style="font-size:12px;color:#a0b4cc;margin-bottom:10px;">${subDate} · <span data-en="Rating for" data-ar="تقييم لـ">Rating for</span> ${tgt?escapeHtml(tgt.full_name):'Employee'}</p>
               <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;">
                 <div><span style="font-size:11px;color:#a0b4cc;">Performance</span> <span style="color:#ffc107;">${'★'.repeat(r.emp_performance||0)}${'☆'.repeat(5-(r.emp_performance||0))}</span></div>
                 <div><span style="font-size:11px;color:#a0b4cc;">Punctuality</span> <span style="color:#ffc107;">${'★'.repeat(r.emp_punctuality||0)}${'☆'.repeat(5-(r.emp_punctuality||0))}</span></div>
@@ -647,24 +722,34 @@ app.get('/dashboard', requireAuth, (req, res) => {
     var area=document.getElementById('ratingFormArea');
     if(sel&&sel.value){area.style.display='block';}else{area.style.display='none';}
   }
-  async function submitFeedback(){
+  async function submitCompanyFeedback(){
+    var data={
+      job_satisfaction:parseInt(document.getElementById('r_job_satisfaction').value),
+      salary_benefits:parseInt(document.getElementById('r_salary_benefits').value),
+      growth_training:parseInt(document.getElementById('r_growth_training').value),
+      team_teamwork:parseInt(document.getElementById('r_team_teamwork').value),
+      team_respect:parseInt(document.getElementById('r_team_respect').value),
+      comment:(document.getElementById('company_comment')||{}).value||''
+    };
+    if(data.job_satisfaction===0||data.salary_benefits===0||data.growth_training===0||data.team_teamwork===0||data.team_respect===0){wfdAlert('Please rate all categories (1-5 stars).','error');return;}
+    try{var r=await fetch('/api/company-feedback',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)});var d=await r.json();
+      if(d.success){wfdAlert('Thank you for your company feedback!','success',function(){location.reload();});}
+      else{wfdAlert(d.message,'error');}}
+    catch(e){wfdAlert('Network error.','error');}
+  }
+  async function submitPersonFeedback(){
     var targetId=document.getElementById('rateTarget').value;
     if(!targetId){wfdAlert('Please select a supervisor to rate.','error');return;}
     var data={
       target_id:targetId,
-      job_satisfaction:parseInt(document.getElementById('r_job_satisfaction').value),
-      salary_benefits:parseInt(document.getElementById('r_salary_benefits').value),
-      growth_training:parseInt(document.getElementById('r_growth_training').value),
       sup_communication:parseInt(document.getElementById('r_sup_communication').value),
       sup_support:parseInt(document.getElementById('r_sup_support').value),
       sup_fairness:parseInt(document.getElementById('r_sup_fairness').value),
-      team_teamwork:parseInt(document.getElementById('r_team_teamwork').value),
-      team_respect:parseInt(document.getElementById('r_team_respect').value),
-      comment:document.getElementById('comment').value.trim()
+      comment:(document.getElementById('person_comment')||{}).value||''
     };
-    if(Object.values(data).some(function(v){return typeof v==='number'&&v===0;})){wfdAlert('Please rate all categories (1-5 stars).','error');return;}
+    if(data.sup_communication===0||data.sup_support===0||data.sup_fairness===0){wfdAlert('Please rate all categories (1-5 stars).','error');return;}
     try{var r=await fetch('/api/feedback',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)});var d=await r.json();
-      if(d.success){wfdAlert('Thank you for your honest feedback!','success',function(){location.reload();});}
+      if(d.success){wfdAlert('Supervisor rating submitted!','success',function(){location.reload();});}
       else{wfdAlert(d.message,'error');}}
     catch(e){wfdAlert('Network error.','error');}
   }
@@ -678,7 +763,7 @@ app.get('/dashboard', requireAuth, (req, res) => {
         emp_punctuality:parseInt(document.getElementById('r_emp_punctuality').value),
         emp_attitude:parseInt(document.getElementById('r_emp_attitude').value),
         emp_initiative:parseInt(document.getElementById('r_emp_initiative').value),
-        sup_comment:document.getElementById('sup_comment').value.trim()
+        sup_comment:(document.getElementById('sup_comment')||{}).value||''
       }]
     };
     if(data.reviews[0].emp_performance===0||data.reviews[0].emp_punctuality===0||data.reviews[0].emp_attitude===0||data.reviews[0].emp_initiative===0){wfdAlert('Please rate all categories.','error');return;}
@@ -690,7 +775,7 @@ app.get('/dashboard', requireAuth, (req, res) => {
   async function deleteRating(reviewId,name){
     if(!confirm('Delete your rating for "'+name+'"?'))return;
     try{var r=await fetch('/api/feedback/delete-rating/'+reviewId,{method:'DELETE'});var d=await r.json();
-      if(d.success){wfdAlert('Rating for '+name+' deleted. You can rate them again.','success',function(){location.reload();});}
+      if(d.success){wfdAlert('Rating for '+name+' deleted. You can rate again.','success',function(){location.reload();});}
       else{wfdAlert(d.message,'error');}}
     catch(e){wfdAlert('Network error.','error');}
   }
@@ -846,23 +931,46 @@ app.delete('/api/feedback/delete-rating/:reviewId', requireAuth, async (req, res
   } catch(e) { console.error('[ERROR] Delete feedback:', e); res.status(500).json({success:false,message:'Server error.'}); }
 });
 
-// ── FEEDBACK API (anonymous) ────────────────────────────────
+// ── COMPANY FEEDBACK API (anonymous, no target person) ─────
+app.post('/api/company-feedback', requireAuth, async (req, res) => {
+  try {
+    const user = req.session.user;
+    const dbUser = getUserById.get(user.id);
+    const now = new Date();
+    const monthStart = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-01`;
+    const { job_satisfaction, salary_benefits, growth_training, team_teamwork, team_respect, comment } = req.body;
+
+    // Check if already submitted company rating this month
+    const existing = db.prepare('SELECT id FROM fb_reviews WHERE reviewer_id=? AND target_type=\'company\' AND created_at>=?').get(user.id, monthStart);
+    if (existing) return res.status(400).json({success:false,message:'You already submitted a company rating this month.'});
+
+    const id = uuidv4();
+    const createdAt = new Date().toISOString();
+    db.prepare('INSERT INTO fb_reviews (id,reviewer_id,reviewer_role,target_type,target_id,department,job_satisfaction,salary_benefits,growth_training,team_teamwork,team_respect,comment,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)')
+      .run(id, user.id, 'employee', 'company', null, dbUser.department, job_satisfaction, salary_benefits, growth_training, team_teamwork, team_respect, comment||null, createdAt);
+    cloudInsert('fb_reviews', {id, reviewer_id:user.id, reviewer_role:'employee', target_type:'company', target_id:null, department:dbUser.department, job_satisfaction, salary_benefits, growth_training, team_teamwork, team_respect, comment:comment||null, created_at:createdAt});
+    res.json({success:true});
+    console.log('[FEEDBACK] Company rating saved from', dbUser.department);
+  } catch(e) { console.error('[ERROR] Company Feedback:', e); res.status(500).json({success:false,message:'Server error.'}); }
+});
+
+// ── PERSON FEEDBACK API (employee rates specific supervisor) ─
 app.post('/api/feedback', requireAuth, async (req, res) => {
   try {
     const user = req.session.user;
     const dbUser = getUserById.get(user.id);
-    // Check per-target monthly limit
     const now = new Date();
     const monthStart = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-01`;
-    const { target_id, job_satisfaction, salary_benefits, growth_training, sup_communication, sup_support, sup_fairness, team_teamwork, team_respect, comment } = req.body;
+    const { target_id, sup_communication, sup_support, sup_fairness, comment } = req.body;
     if (!target_id) return res.status(400).json({success:false,message:'Please select a supervisor to rate.'});
     const existing = db.prepare('SELECT id FROM fb_reviews WHERE reviewer_id=? AND target_id=? AND created_at>=?').get(user.id, target_id, monthStart);
-    if (existing) return res.status(400).json({success:false,message:'You already rated this person this month.'});
+    if (existing) return res.status(400).json({success:false,message:'You already rated this supervisor this month.'});
 
     const id = uuidv4();
-    db.prepare('INSERT INTO fb_reviews (id,reviewer_id,reviewer_role,target_type,target_id,department,job_satisfaction,salary_benefits,growth_training,sup_communication,sup_support,sup_fairness,team_teamwork,team_respect,comment,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)')
-      .run(id, user.id, 'employee', 'supervisor', target_id, dbUser.department, job_satisfaction, salary_benefits, growth_training, sup_communication, sup_support, sup_fairness, team_teamwork, team_respect, comment||null, new Date().toISOString());
-    cloudInsert('fb_reviews', {id, reviewer_id:user.id, reviewer_role:'employee', target_type:'supervisor', target_id, department:dbUser.department, job_satisfaction, salary_benefits, growth_training, sup_communication, sup_support, sup_fairness, team_teamwork, team_respect, comment:comment||null, created_at:new Date().toISOString()});
+    const createdAt = new Date().toISOString();
+    db.prepare('INSERT INTO fb_reviews (id,reviewer_id,reviewer_role,target_type,target_id,department,sup_communication,sup_support,sup_fairness,comment,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)')
+      .run(id, user.id, 'employee', 'supervisor', target_id, dbUser.department, sup_communication, sup_support, sup_fairness, comment||null, createdAt);
+    cloudInsert('fb_reviews', {id, reviewer_id:user.id, reviewer_role:'employee', target_type:'supervisor', target_id, department:dbUser.department, sup_communication, sup_support, sup_fairness, comment:comment||null, created_at:createdAt});
     res.json({success:true});
 
     // Email ONLY the specific supervisor who was rated
@@ -870,23 +978,18 @@ app.post('/api/feedback', requireAuth, async (req, res) => {
       const ratedSup = getUserById.get(target_id);
       if (ratedSup) {
         const emailHtml = `<div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;background:#0a1628;color:#fff;padding:30px;border-radius:12px;">
-          <h2 style="color:#4da6ff;">Your Rating Has Been Updated</h2>
+          <h2 style="color:#4da6ff;">New Supervisor Rating Received</h2>
           <p style="color:#a0b4cc;">Hello <strong>${ratedSup.full_name}</strong>,</p>
           <p style="color:#a0b4cc;">An anonymous employee has submitted a rating about you.</p>
           <table style="width:100%;border-collapse:collapse;margin:16px 0;">
-            <tr><td style="padding:8px;color:#a0b4cc;">Job Satisfaction</td><td style="padding:8px;color:#ffc107;font-weight:700;">${job_satisfaction} / 5</td></tr>
-            <tr><td style="padding:8px;color:#a0b4cc;">Salary & Benefits</td><td style="padding:8px;color:#ffc107;font-weight:700;">${salary_benefits} / 5</td></tr>
-            <tr><td style="padding:8px;color:#a0b4cc;">Growth & Training</td><td style="padding:8px;color:#ffc107;font-weight:700;">${growth_training} / 5</td></tr>
             <tr><td style="padding:8px;color:#a0b4cc;">Communication</td><td style="padding:8px;color:#ffc107;font-weight:700;">${sup_communication} / 5</td></tr>
             <tr><td style="padding:8px;color:#a0b4cc;">Support</td><td style="padding:8px;color:#ffc107;font-weight:700;">${sup_support} / 5</td></tr>
             <tr><td style="padding:8px;color:#a0b4cc;">Fairness</td><td style="padding:8px;color:#ffc107;font-weight:700;">${sup_fairness} / 5</td></tr>
-            <tr><td style="padding:8px;color:#a0b4cc;">Teamwork</td><td style="padding:8px;color:#ffc107;font-weight:700;">${team_teamwork} / 5</td></tr>
-            <tr><td style="padding:8px;color:#a0b4cc;">Respect</td><td style="padding:8px;color:#ffc107;font-weight:700;">${team_respect} / 5</td></tr>
           </table>
           <div style="background:rgba(77,166,255,0.1);border:1px solid rgba(77,166,255,0.3);border-radius:8px;padding:10px;margin-top:12px;text-align:center;"><p style="color:#4da6ff;font-size:13px;font-weight:600;">📌 This is your final rating for this month.</p></div>
           <p style="font-size:12px;color:#4a6a8a;">This is an automated notification from Watan First Digital Feedback System.</p>
         </div>`;
-        await sendBrevoEmail(ratedSup.email, 'Rating Updated — Watan First Digital', emailHtml);
+        await sendBrevoEmail(ratedSup.email, 'Supervisor Rating — Watan First Digital', emailHtml);
         console.log('[EMAIL] Sent rating to specific supervisor:', ratedSup.email);
       }
     } catch(emailErr) { console.error('[EMAIL] Feedback notify error:', emailErr.message); }
