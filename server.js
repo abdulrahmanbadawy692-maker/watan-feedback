@@ -490,7 +490,7 @@ app.get('/dashboard', requireAuth, (req, res) => {
         <div style="text-align:center;padding:20px;background:rgba(74,222,128,0.06);border-radius:12px;">
           <p style="color:#4ade80;font-size:16px;font-weight:600;" data-en="✅ Company rating submitted this month" data-ar="✅ تم إرسال تقييم الشركة هذا الشهر">✅ Company rating submitted this month</p>
           <p style="color:#a0b4cc;font-size:13px;margin-top:6px;" data-en="You can submit again next month." data-ar="يمكنك الإرسال مرة أخرى الشهر القادم.">You can submit again next month.</p>
-          ${companyCanDelete ? `<button onclick="deleteRating('${companyRatingThisMonth.id}','Company Rating')" style="margin-top:10px;padding:6px 16px;background:rgba(220,53,69,0.1);border:1px solid rgba(220,53,69,0.3);border-radius:8px;color:#ff6b7a;cursor:pointer;font-size:12px;font-weight:600;font-family:inherit;" data-en="🗑️ Delete & Re-submit" data-ar="🗑️ حذف وإعادة إرسال">🗑️ Delete & Re-submit</button>` : ''}
+          ${companyCanDelete ? `<p style="color:#ffc107;font-size:11px;margin-top:8px;" data-en="⏰ You can delete & re-submit within 24 hours only." data-ar="⏰ يمكنك الحذف وإعادة الإرسال خلال 24 ساعة فقط.">⏰ You can delete & re-submit within 24 hours only.</p><button onclick="deleteRating('${companyRatingThisMonth.id}','Company Rating')" style="margin-top:10px;padding:6px 16px;background:rgba(220,53,69,0.1);border:1px solid rgba(220,53,69,0.3);border-radius:8px;color:#ff6b7a;cursor:pointer;font-size:12px;font-weight:600;font-family:inherit;" data-en="🗑️ Delete & Re-submit" data-ar="🗑️ حذف وإعادة إرسال">🗑️ Delete & Re-submit</button>` : `<p style="color:#4a6a8a;font-size:11px;margin-top:8px;" data-en="🔒 24-hour edit window has passed. This rating is now final." data-ar="🔒 انتهت فترة التعديل (24 ساعة). هذا التقييم نهائي الآن.">🔒 24-hour edit window has passed. This rating is now final.</p>`}
         </div>
       ` : `
         <div class="trust-banner">
@@ -530,7 +530,7 @@ app.get('/dashboard', requireAuth, (req, res) => {
       ${unratedTargets.length === 0 && personRatingsThisMonth.length > 0 ? `
         <div style="text-align:center;padding:20px;background:rgba(74,222,128,0.06);border-radius:12px;">
           <p style="color:#4ade80;font-size:16px;font-weight:600;" data-en="✅ You have rated all supervisors this month" data-ar="✅ لقد قيّمت جميع المشرفين هذا الشهر">✅ You have rated all supervisors this month</p>
-          <p style="color:#a0b4cc;font-size:13px;margin-top:8px;" data-en="Delete a rating below to re-rate." data-ar="احذف تقييم أدناه لإعادة التقييم.">Delete a rating below to re-rate.</p>
+          <p style="color:#a0b4cc;font-size:13px;margin-top:8px;" data-en="Delete a rating below to re-rate (within 24 hours only)." data-ar="احذف تقييم أدناه لإعادة التقييم (خلال 24 ساعة فقط).">Delete a rating below to re-rate (within 24 hours only).</p>
           <div style="display:flex;flex-wrap:wrap;gap:6px;justify-content:center;margin-top:12px;">
             ${ratedWithInfo.map(r => `<div style="display:inline-flex;align-items:center;gap:6px;background:rgba(74,222,128,0.1);border:1px solid rgba(74,222,128,0.3);border-radius:20px;padding:4px 12px;"><span style="font-size:12px;color:#4ade80;">✅ ${escapeHtml(r.name)}</span>${r.canDelete ? `<button onclick="deleteRating('${r.reviewId}','${escapeHtml(r.name)}')" style="background:none;border:none;color:#ff6b7a;cursor:pointer;font-size:12px;padding:0 2px;" title="Delete rating">🗑️</button>` : ''}</div>`).join('')}
           </div>
@@ -572,7 +572,7 @@ app.get('/dashboard', requireAuth, (req, res) => {
         <div style="text-align:center;padding:20px;background:rgba(74,222,128,0.06);border-radius:12px;">
           <p style="color:#4ade80;font-size:16px;font-weight:600;" data-en="✅ Company rating submitted this month" data-ar="✅ تم إرسال تقييم الشركة هذا الشهر">✅ Company rating submitted this month</p>
           <p style="color:#a0b4cc;font-size:13px;margin-top:6px;" data-en="You can submit again next month." data-ar="يمكنك الإرسال مرة أخرى الشهر القادم.">You can submit again next month.</p>
-          ${companyCanDelete ? `<button onclick="deleteRating('${companyRatingThisMonth.id}','Company Rating')" style="margin-top:10px;padding:6px 16px;background:rgba(220,53,69,0.1);border:1px solid rgba(220,53,69,0.3);border-radius:8px;color:#ff6b7a;cursor:pointer;font-size:12px;font-weight:600;font-family:inherit;" data-en="🗑️ Delete & Re-submit" data-ar="🗑️ حذف وإعادة إرسال">🗑️ Delete & Re-submit</button>` : ''}
+          ${companyCanDelete ? `<p style="color:#ffc107;font-size:11px;margin-top:8px;" data-en="⏰ You can delete & re-submit within 24 hours only." data-ar="⏰ يمكنك الحذف وإعادة الإرسال خلال 24 ساعة فقط.">⏰ You can delete & re-submit within 24 hours only.</p><button onclick="deleteRating('${companyRatingThisMonth.id}','Company Rating')" style="margin-top:10px;padding:6px 16px;background:rgba(220,53,69,0.1);border:1px solid rgba(220,53,69,0.3);border-radius:8px;color:#ff6b7a;cursor:pointer;font-size:12px;font-weight:600;font-family:inherit;" data-en="🗑️ Delete & Re-submit" data-ar="🗑️ حذف وإعادة إرسال">🗑️ Delete & Re-submit</button>` : `<p style="color:#4a6a8a;font-size:11px;margin-top:8px;" data-en="🔒 24-hour edit window has passed. This rating is now final." data-ar="🔒 انتهت فترة التعديل (24 ساعة). هذا التقييم نهائي الآن.">🔒 24-hour edit window has passed. This rating is now final.</p>`}
         </div>
       ` : `
         <div class="trust-banner">
@@ -611,7 +611,7 @@ app.get('/dashboard', requireAuth, (req, res) => {
       ${unratedTargets.length === 0 && personRatingsThisMonth.length > 0 ? `
         <div style="text-align:center;padding:20px;background:rgba(74,222,128,0.06);border-radius:12px;">
           <p style="color:#4ade80;font-size:16px;font-weight:600;" data-en="✅ You have rated all employees this month" data-ar="✅ لقد قيّمت جميع الموظفين هذا الشهر">✅ You have rated all employees this month</p>
-          <p style="color:#a0b4cc;font-size:13px;margin-top:8px;" data-en="Delete a rating below to re-rate." data-ar="احذف تقييم أدناه لإعادة التقييم.">Delete a rating below to re-rate.</p>
+          <p style="color:#a0b4cc;font-size:13px;margin-top:8px;" data-en="Delete a rating below to re-rate (within 24 hours only)." data-ar="احذف تقييم أدناه لإعادة التقييم (خلال 24 ساعة فقط).">Delete a rating below to re-rate (within 24 hours only).</p>
           <div style="display:flex;flex-wrap:wrap;gap:6px;justify-content:center;margin-top:12px;">
             ${ratedWithInfo.map(r => `<div style="display:inline-flex;align-items:center;gap:6px;background:rgba(74,222,128,0.1);border:1px solid rgba(74,222,128,0.3);border-radius:20px;padding:4px 12px;"><span style="font-size:12px;color:#4ade80;">✅ ${escapeHtml(r.name)}</span>${r.canDelete ? `<button onclick="deleteRating('${r.reviewId}','${escapeHtml(r.name)}')" style="background:none;border:none;color:#ff6b7a;cursor:pointer;font-size:12px;padding:0 2px;" title="Delete rating">🗑️</button>` : ''}</div>`).join('')}
           </div>
