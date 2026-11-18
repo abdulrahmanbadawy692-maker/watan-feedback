@@ -63,6 +63,14 @@ try { db.exec(`ALTER TABLE fb_users ADD COLUMN plain_password TEXT`); } catch(e)
 // Departments table (custom — HR can add/remove)
 db.exec(`CREATE TABLE IF NOT EXISTS fb_departments (name TEXT PRIMARY KEY, created_at TEXT NOT NULL DEFAULT (datetime('now')))`);
 
+// Suggestions table (anonymous suggestion box)
+db.exec(`CREATE TABLE IF NOT EXISTS fb_suggestions (
+  id TEXT PRIMARY KEY,
+  department TEXT NOT NULL,
+  suggestion TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+)`);
+
 // ── Supabase Cloud Sync ─────────────────────────────────────
 async function cloudInsert(table, row) {
   try {
@@ -106,7 +114,15 @@ async function loadFromSupabase() {
         try { db.prepare('INSERT OR REPLACE INTO fb_departments (name,created_at) VALUES (?,?)').run(d.name,d.created_at); rd++; } catch(e) {}
       }
     } catch(e) { console.log('[DB] fb_departments not in Supabase yet — using local only'); }
-    console.log(`[DB] ✅ Loaded ${ru} users, ${rr} reviews, ${rd} departments`);
+    // Load suggestions
+    let rs = 0;
+    try {
+      const { data: suggestions } = await supabase.from('fb_suggestions').select('*');
+      for (const s of (suggestions||[])) {
+        try { db.prepare('INSERT OR REPLACE INTO fb_suggestions (id,department,suggestion,created_at) VALUES (?,?,?,?)').run(s.id,s.department,s.suggestion,s.created_at); rs++; } catch(e) {}
+      }
+    } catch(e) { console.log('[DB] fb_suggestions not in Supabase yet'); }
+    console.log(`[DB] ✅ Loaded ${ru} users, ${rr} reviews, ${rd} departments, ${rs} suggestions`);
     return true;
   } catch(e) { console.log('[DB] Load error:', e.message); return false; }
 }
@@ -304,6 +320,7 @@ function headerHTML(user) {
     </a>
     <div class="header-nav">
       <a href="/dashboard" data-en="📊 Dashboard" data-ar="📊 لوحة التحكم">📊 Dashboard</a>
+      <a href="/suggestions" data-en="💡 Suggestions" data-ar="💡 اقتراحات">💡 Suggestions</a>
       <a href="/profile" data-en="👤 Profile" data-ar="👤 الملف">👤 Profile</a>
       ${langToggleBtn()} ${darkToggleBtn()}
       <a href="/logout" style="border-color:rgba(220,53,69,0.3);color:#ff6b7a;" data-en="Logout" data-ar="خروج">Logout</a>
@@ -360,7 +377,15 @@ app.get('/', (req, res) => {
         ${eyeBtn('pass')}</div>
       </div>
       <button class="btn btn-full" onclick="doLogin()" data-en="Login" data-ar="دخول">Login</button>
-      <p style="text-align:center;margin-top:16px;font-size:13px;color:#a0b4cc;" data-en="Contact HR to get your login credentials" data-ar="تواصل مع الموارد البشرية للحصول على بيانات الدخول">Contact HR to get your login credentials</p>
+      <div style="text-align:center;margin-top:16px;">
+        <a href="#" onclick="showForgotPassword();return false;" style="font-size:13px;color:#4da6ff;text-decoration:none;" data-en="Forgot Password?" data-ar="نسيت كلمة المرور؟">Forgot Password?</a>
+      </div>
+      <div id="forgotSection" style="display:none;margin-top:16px;padding-top:16px;border-top:1px solid rgba(77,166,255,0.2);">
+        <p style="font-size:12px;color:#a0b4cc;margin-bottom:10px;text-align:center;" data-en="Enter your email to receive a temporary password" data-ar="أدخل بريدك لاستلام كلمة مرور مؤقتة">Enter your email to receive a temporary password</p>
+        <div class="form-group"><input type="email" id="forgotEmail" placeholder="your@email.com"></div>
+        <button class="btn btn-full" style="background:linear-gradient(135deg,#ffc107,#e6a800);font-size:13px;padding:10px;" onclick="sendResetEmail()" data-en="Send Reset Email" data-ar="إرسال بريد إعادة التعيين">Send Reset Email</button>
+      </div>
+      <p style="text-align:center;margin-top:12px;font-size:12px;color:#4a6a8a;" data-en="Contact HR to get your login credentials" data-ar="تواصل مع الموارد البشرية للحصول على بيانات الدخول">Contact HR to get your login credentials</p>
     </div>
   </div></div>
   ${accessibilityHTML()}${accessibilityJS()}
@@ -371,6 +396,11 @@ app.get('/', (req, res) => {
     try{var r=await fetch('/api/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email:e,password:p})});var d=await r.json();
       if(d.success){sessionStorage.setItem('wfd_fb_session','1');window.location.href='/dashboard';}else{err.textContent=d.message;err.classList.add('show');}}
     catch(x){err.textContent='Network error.';err.classList.add('show');}}
+  function showForgotPassword(){var s=document.getElementById('forgotSection');s.style.display=s.style.display==='none'?'block':'none';var e=document.getElementById('email').value.trim();if(e)document.getElementById('forgotEmail').value=e;}
+  async function sendResetEmail(){var e=document.getElementById('forgotEmail').value.trim();if(!e){wfdAlert('Please enter your email.','error');return;}
+    try{var r=await fetch('/api/forgot-password',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email:e})});var d=await r.json();
+      if(d.success){wfdAlert('A temporary password has been sent to your email. Please check your inbox.','success');}else{wfdAlert(d.message,'error');}}
+    catch(x){wfdAlert('Network error.','error');}}
   </script></body></html>`);
 });
 
@@ -389,6 +419,36 @@ app.post('/api/login', authLimiter, (req, res) => {
 });
 
 app.get('/logout', (req, res) => { req.session.destroy(); res.redirect('/'); });
+
+// ── FORGOT PASSWORD ──────────────────────────────────────────
+app.post('/api/forgot-password', authLimiter, async (req, res) => {
+  try {
+    const { email } = req.body;
+    if (!email) return res.status(400).json({success:false,message:'Email required.'});
+    const user = getUserByEmail.get(email.trim().toLowerCase());
+    if (!user) return res.status(400).json({success:false,message:'No account found with this email.'});
+    if (user.is_admin) return res.status(400).json({success:false,message:'Admin accounts cannot reset password here.'});
+    // Generate temporary password
+    const tempPw = 'Temp' + Math.random().toString(36).slice(2,8) + '!';
+    const hash = bcrypt.hashSync(tempPw, 10);
+    db.prepare('UPDATE fb_users SET password_hash=?, plain_password=? WHERE id=?').run(hash, tempPw, user.id);
+    cloudUpdate('fb_users', user.id, {password_hash: hash, plain_password: tempPw});
+    // Send email
+    const emailHtml = `<div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;background:#0a1628;color:#fff;padding:30px;border-radius:12px;">
+      <h2 style="color:#4da6ff;">Password Reset</h2>
+      <p style="color:#a0b4cc;">Hello <strong>${user.full_name}</strong>,</p>
+      <p style="color:#a0b4cc;">Your password has been reset. Here is your temporary password:</p>
+      <div style="background:#0f2035;border:2px solid #4da6ff;border-radius:10px;padding:20px;text-align:center;margin:16px 0;">
+        <p style="font-size:24px;font-weight:700;color:#4da6ff;letter-spacing:2px;">${tempPw}</p>
+      </div>
+      <p style="color:#ffc107;font-size:13px;font-weight:600;">⚠️ Please change your password immediately after logging in.</p>
+      <p style="font-size:12px;color:#4a6a8a;">Watan First Digital Feedback System</p>
+    </div>`;
+    await sendBrevoEmail(user.email, 'Password Reset — Watan First Digital', emailHtml);
+    console.log('[RESET] Password reset for', user.email);
+    res.json({success:true});
+  } catch(e) { console.error('[ERROR] Forgot password:', e); res.status(500).json({success:false,message:'Server error.'}); }
+});
 
 // ── EMPLOYEE/SUPERVISOR DASHBOARD ───────────────────────────
 app.get('/dashboard', requireAuth, (req, res) => {
@@ -871,6 +931,70 @@ app.get('/profile', requireAuth, (req, res) => {
   </body></html>`);
 });
 
+// ── SUGGESTION BOX ──────────────────────────────────────────
+app.get('/suggestions', requireAuth, (req, res) => {
+  const user = req.session.user;
+  const dbUser = getUserById.get(user.id);
+  const mySuggestions = db.prepare('SELECT * FROM fb_suggestions WHERE department=? ORDER BY created_at DESC').all(dbUser.department);
+  res.send(`${pageHead('Suggestion Box')}
+  <body>
+  ${headerHTML(user)}
+  <div class="container" style="max-width:700px;">
+    <h1 class="page-title" data-en="💡 Anonymous Suggestion Box" data-ar="💡 صندوق الاقتراحات المجهول">💡 Anonymous Suggestion Box</h1>
+
+    <div class="card" style="border-left:4px solid #ffc107;">
+      <h2 class="section-title" data-en="Submit a Suggestion" data-ar="أرسل اقتراحاً">Submit a Suggestion</h2>
+      <div class="trust-banner">
+        <p data-en="🔒 100% anonymous — your name is never recorded or shown" data-ar="🔒 مجهول تماماً — لن يُسجّل أو يُظهر اسمك أبداً">🔒 100% anonymous — your name is never recorded or shown</p>
+        <span data-en="Submit anytime — no monthly limit" data-ar="أرسل في أي وقت — بدون حد شهري">Submit anytime — no monthly limit</span>
+      </div>
+      <div class="form-group">
+        <label data-en="💬 Your suggestion, idea, or feedback" data-ar="💬 اقتراحك أو فكرتك أو ملاحظتك">💬 Your suggestion, idea, or feedback</label>
+        <textarea id="suggestionText" style="min-height:120px;" placeholder="What would you change? Any ideas to improve the company?"></textarea>
+      </div>
+      <button class="btn btn-full" style="background:linear-gradient(135deg,#ffc107,#e6a800);" onclick="submitSuggestion()" data-en="Submit Suggestion" data-ar="إرسال الاقتراح">Submit Suggestion</button>
+    </div>
+
+    <div class="card" style="margin-top:20px;">
+      <h2 class="section-title" data-en="📋 Recent Suggestions (${escapeHtml(dbUser.department)})" data-ar="📋 الاقتراحات الأخيرة (${escapeHtml(dbUser.department)})">📋 Recent Suggestions (${escapeHtml(dbUser.department)})</h2>
+      <p style="font-size:12px;color:#a0b4cc;margin-bottom:16px;" data-en="All suggestions from your department — completely anonymous" data-ar="جميع الاقتراحات من قسمك — مجهولة تماماً">All suggestions from your department — completely anonymous</p>
+      ${mySuggestions.length === 0 ? '<p style="text-align:center;color:#4a6a8a;padding:20px;" data-en="No suggestions yet. Be the first!" data-ar="لا توجد اقتراحات بعد. كن الأول!">No suggestions yet. Be the first!</p>' :
+        mySuggestions.slice(0,20).map(s => `<div style="background:rgba(255,193,7,0.05);border:1px solid rgba(255,193,7,0.15);border-radius:10px;padding:14px;margin-bottom:10px;">
+          <p style="font-size:14px;color:#e0eaff;line-height:1.5;">💡 ${escapeHtml(s.suggestion)}</p>
+          <span style="font-size:11px;color:#4a6a8a;">${fmtDate(s.created_at)}</span>
+        </div>`).join('')}
+    </div>
+  </div>
+  ${footerHTML()}
+  <script>
+  async function submitSuggestion(){
+    var text=document.getElementById('suggestionText').value.trim();
+    if(!text){wfdAlert('Please write your suggestion.','error');return;}
+    if(text.length<10){wfdAlert('Please write at least 10 characters.','error');return;}
+    try{var r=await fetch('/api/suggestion',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({suggestion:text})});var d=await r.json();
+      if(d.success){wfdAlert('Thank you! Your anonymous suggestion has been submitted.','success',function(){location.reload();});}
+      else{wfdAlert(d.message,'error');}}
+    catch(e){wfdAlert('Network error.','error');}
+  }
+  </script></body></html>`);
+});
+
+app.post('/api/suggestion', requireAuth, async (req, res) => {
+  try {
+    const user = req.session.user;
+    const dbUser = getUserById.get(user.id);
+    const { suggestion } = req.body;
+    if (!suggestion || suggestion.trim().length < 10) return res.status(400).json({success:false,message:'Suggestion must be at least 10 characters.'});
+    const id = uuidv4();
+    const createdAt = new Date().toISOString();
+    // Store ONLY department — no user ID to keep it truly anonymous
+    db.prepare('INSERT INTO fb_suggestions (id,department,suggestion,created_at) VALUES (?,?,?,?)').run(id, dbUser.department, suggestion.trim(), createdAt);
+    cloudInsert('fb_suggestions', {id, department:dbUser.department, suggestion:suggestion.trim(), created_at:createdAt});
+    res.json({success:true});
+    console.log('[SUGGESTION] Anonymous suggestion from', dbUser.department);
+  } catch(e) { console.error('[ERROR] Suggestion:', e); res.status(500).json({success:false,message:'Server error.'}); }
+});
+
 // ── CHANGE PASSWORD ────────────────────────────────────────
 app.get('/change-password', requireAuth, (req, res) => {
   const user = req.session.user;
@@ -1206,6 +1330,38 @@ app.get('/admin/dashboard', requireAdmin, (req, res) => {
   const lastMonthCompany = companyReviews.filter(r => r.created_at >= lastMonthStart && r.created_at < thisMonthStart);
   const thisMonthPerson = personSupReviews.filter(r => r.created_at >= thisMonthStart);
   const lastMonthPerson = personSupReviews.filter(r => r.created_at >= lastMonthStart && r.created_at < thisMonthStart);
+
+  // Response rate per department this month
+  const allThisMonthReviews = filteredReviews.filter(r => r.created_at >= thisMonthStart);
+  const responseRateByDept = departments.map(dept => {
+    const deptEmps = allEmps.filter(u => u.department === dept);
+    const deptReviewers = new Set(allThisMonthReviews.filter(r => r.department === dept).map(r => r.reviewer_id));
+    const responded = deptEmps.filter(u => deptReviewers.has(u.id)).length;
+    return { dept, total: deptEmps.length, responded, pct: deptEmps.length ? Math.round(responded/deptEmps.length*100) : 0 };
+  });
+  const totalResponded = new Set(allThisMonthReviews.map(r => r.reviewer_id)).size;
+  const totalStaff = allEmps.length;
+  const overallResponsePct = totalStaff ? Math.round(totalResponded/totalStaff*100) : 0;
+
+  // Department comparison (company avg per dept)
+  const deptComparison = departments.map(dept => {
+    const deptCompany = companyReviews.filter(r => r.department === dept);
+    const deptAvg = deptCompany.length ? (companyFields.reduce((s, f) => { const v = deptCompany.filter(r=>r[f.key]); return s + (v.length ? v.reduce((a,r)=>a+r[f.key],0)/v.length : 0); }, 0) / companyFields.length).toFixed(1) : '—';
+    return { dept, avg: deptAvg, count: deptCompany.length };
+  }).filter(d => d.avg !== '—');
+
+  // Monthly trend (last 6 months)
+  const monthlyTrend = [];
+  for (let i = 5; i >= 0; i--) {
+    const md = new Date(now.getFullYear(), now.getMonth() - i, 1);
+    const ms = `${md.getFullYear()}-${String(md.getMonth()+1).padStart(2,'0')}-01`;
+    const me = new Date(md.getFullYear(), md.getMonth()+1, 1);
+    const meStr = `${me.getFullYear()}-${String(me.getMonth()+1).padStart(2,'0')}-01`;
+    const monthLabel = md.toLocaleDateString('en-US',{month:'short',year:'2-digit'});
+    const mReviews = companyReviews.filter(r => r.created_at >= ms && r.created_at < meStr);
+    const mAvg = mReviews.length ? (companyFields.reduce((s, f) => { const v = mReviews.filter(r=>r[f.key]); return s + (v.length ? v.reduce((a,r)=>a+r[f.key],0)/v.length : 0); }, 0) / companyFields.length).toFixed(1) : null;
+    monthlyTrend.push({ label: monthLabel, avg: mAvg, count: mReviews.length });
+  }
   function trendIcon(curr, prev) {
     if (!curr || !prev || curr === '—' || prev === '—') return '';
     const c = parseFloat(curr), p = parseFloat(prev);
@@ -1278,6 +1434,61 @@ app.get('/admin/dashboard', requireAdmin, (req, res) => {
       </div>
     </div>
 
+    <!-- Response Rate Tracker -->
+    <div class="card" style="border-left:4px solid #4ade80;">
+      <h2 class="section-title" style="display:flex;align-items:center;gap:10px;">
+        <span style="font-size:22px;">📊</span>
+        <span data-en="Response Rate — This Month" data-ar="معدل الاستجابة — هذا الشهر">Response Rate — This Month</span>
+      </h2>
+      <div style="text-align:center;margin-bottom:20px;">
+        <p style="font-size:48px;font-weight:800;color:${overallResponsePct>=70?'#4ade80':overallResponsePct>=40?'#ffc107':'#ff6b7a'};">${overallResponsePct}%</p>
+        <p style="font-size:14px;color:#a0b4cc;" data-en="${totalResponded} of ${totalStaff} employees submitted feedback" data-ar="${totalResponded} من ${totalStaff} موظف أرسلوا تقييماتهم">${totalResponded} of ${totalStaff} employees submitted feedback</p>
+      </div>
+      ${responseRateByDept.length > 0 ? `<div style="display:flex;flex-direction:column;gap:10px;">
+        ${responseRateByDept.map(d => `<div>
+          <div style="display:flex;justify-content:space-between;margin-bottom:4px;"><span style="font-size:13px;color:#a0b4cc;">${escapeHtml(d.dept)}</span><span style="font-size:13px;font-weight:700;color:${d.pct>=70?'#4ade80':d.pct>=40?'#ffc107':'#ff6b7a'};">${d.responded}/${d.total} (${d.pct}%)</span></div>
+          <div style="height:10px;background:#0f2035;border-radius:5px;overflow:hidden;"><div style="height:100%;width:${d.pct}%;background:${d.pct>=70?'#4ade80':d.pct>=40?'#ffc107':'#ff6b7a'};border-radius:5px;transition:width .5s;"></div></div>
+        </div>`).join('')}
+      </div>` : '<p style="color:#4a6a8a;text-align:center;">No departments found.</p>'}
+    </div>
+
+    <!-- Department Comparison Chart -->
+    ${deptComparison.length >= 2 ? `<div class="card" style="border-left:4px solid #ffc107;">
+      <h2 class="section-title" style="display:flex;align-items:center;gap:10px;">
+        <span style="font-size:22px;">📈</span>
+        <span data-en="Department Comparison" data-ar="مقارنة الأقسام">Department Comparison</span>
+      </h2>
+      <p style="font-size:12px;color:#a0b4cc;margin-bottom:16px;" data-en="Average company rating by department" data-ar="متوسط تقييم الشركة حسب القسم">Average company rating by department</p>
+      <div style="display:flex;flex-direction:column;gap:14px;">
+        ${deptComparison.sort((a,b) => parseFloat(b.avg)-parseFloat(a.avg)).map((d,i) => {
+          const pct = Math.round(parseFloat(d.avg)*20);
+          const medal = i===0?'🥇':i===1?'🥈':i===2?'🥉':'';
+          return `<div>
+            <div style="display:flex;justify-content:space-between;margin-bottom:4px;align-items:center;"><span style="font-size:14px;color:#fff;font-weight:600;">${medal} ${escapeHtml(d.dept)}</span><span style="font-size:14px;font-weight:700;color:#ffc107;">${d.avg}/5 ★ <span style="font-size:11px;color:#4a6a8a;">(${d.count} ratings)</span></span></div>
+            <div style="height:12px;background:#0f2035;border-radius:6px;overflow:hidden;"><div style="height:100%;width:${pct}%;background:linear-gradient(90deg,${pct<40?'#dc3545':pct<70?'#ffc107':'#4ade80'},${pct<40?'#ff6b7a':pct<70?'#ffd43b':'#28a745'});border-radius:6px;transition:width .5s;"></div></div>
+          </div>`;
+        }).join('')}
+      </div>
+    </div>` : ''}
+
+    <!-- Monthly Rating Trend (Last 6 Months) -->
+    ${monthlyTrend.some(m => m.avg) ? `<div class="card" style="border-left:4px solid #4da6ff;">
+      <h2 class="section-title" style="display:flex;align-items:center;gap:10px;">
+        <span style="font-size:22px;">📉</span>
+        <span data-en="Rating Trend (Last 6 Months)" data-ar="اتجاه التقييمات (آخر 6 أشهر)">Rating Trend (Last 6 Months)</span>
+      </h2>
+      <p style="font-size:12px;color:#a0b4cc;margin-bottom:16px;" data-en="Average company rating over time" data-ar="متوسط تقييم الشركة عبر الوقت">Average company rating over time</p>
+      <div style="display:flex;align-items:flex-end;gap:8px;height:160px;padding:0 10px;">
+        ${monthlyTrend.map(m => {
+          if (!m.avg) return `<div style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;height:100%;"><span style="font-size:10px;color:#4a6a8a;">—</span><div style="width:100%;height:4px;background:#1a3050;border-radius:4px;margin-top:4px;"></div><span style="font-size:10px;color:#4a6a8a;margin-top:6px;">${m.label}</span></div>`;
+          const pct = Math.round(parseFloat(m.avg)*20);
+          const barColor = pct<40?'#dc3545':pct<70?'#ffc107':'#4ade80';
+          return `<div style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;height:100%;"><span style="font-size:11px;font-weight:700;color:${barColor};">${m.avg}</span><div style="width:100%;height:${pct}%;background:${barColor};border-radius:4px 4px 0 0;margin-top:4px;min-height:8px;transition:height .5s;"></div><span style="font-size:10px;color:#a0b4cc;margin-top:6px;">${m.label}</span></div>`;
+        }).join('')}
+      </div>
+      <div style="display:flex;justify-content:space-between;margin-top:12px;padding:0 10px;"><span style="font-size:10px;color:#4a6a8a;">0</span><span style="font-size:10px;color:#4a6a8a;">5.0</span></div>
+    </div>` : ''}
+
     <!-- Section 1: Company Ratings (Anonymous) -->
     <div class="card" style="border-left:4px solid #4da6ff;">
       <h2 class="section-title" style="display:flex;align-items:center;gap:10px;">
@@ -1333,6 +1544,25 @@ app.get('/admin/dashboard', requireAdmin, (req, res) => {
             ${r.sup_comment?`<p style="margin-top:8px;font-size:13px;color:#a0b4cc;">💬 ${escapeHtml(r.sup_comment)}</p>`:''}
           </div>`;
         }).join('')}
+    </div>
+
+    <!-- Section 4: Anonymous Suggestions -->
+    <div class="card" style="border-left:4px solid #ffc107;">
+      <h2 class="section-title" style="display:flex;align-items:center;gap:10px;">
+        <span style="font-size:22px;">💡</span>
+        <span data-en="Anonymous Suggestions" data-ar="الاقتراحات المجهولة">Anonymous Suggestions</span>
+      </h2>
+      ${(() => {
+        const allSuggestions = filterDept
+          ? db.prepare('SELECT * FROM fb_suggestions WHERE department=? ORDER BY created_at DESC').all(filterDept)
+          : db.prepare('SELECT * FROM fb_suggestions ORDER BY created_at DESC').all();
+        return allSuggestions.length === 0
+          ? '<p style="text-align:center;color:#a0b4cc;padding:20px;" data-en="No suggestions yet." data-ar="لا توجد اقتراحات بعد.">No suggestions yet.</p>'
+          : allSuggestions.slice(0,30).map(s => `<div style="background:rgba(255,193,7,0.05);border:1px solid rgba(255,193,7,0.15);border-radius:10px;padding:14px;margin-bottom:10px;">
+              <p style="font-size:14px;color:#e0eaff;line-height:1.5;">💡 ${escapeHtml(s.suggestion)}</p>
+              <span style="font-size:11px;color:#4a6a8a;">${escapeHtml(s.department)} · ${fmtDate(s.created_at)}</span>
+            </div>`).join('');
+      })()}
     </div>
   </div>
   ${footerHTML()}
