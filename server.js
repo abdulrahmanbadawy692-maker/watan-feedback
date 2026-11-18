@@ -1724,7 +1724,7 @@ app.get('/admin/dashboard', requireAdmin, (req, res) => {
                 <button onclick="submitResponse('${s.id}')" class="btn" style="padding:8px 20px;font-size:13px;">Submit</button>
                 <button onclick="document.getElementById('respond_${s.id}').style.display='none';document.getElementById('actions_${s.id}').style.display='flex';" style="padding:8px 16px;background:#4a6a8a;color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:12px;font-family:inherit;">Cancel</button>
               </div>
-            </div>` : ''}
+            </div>` : s.status==='rejected' ? `<div style="margin-top:10px;"><button onclick="hrDeleteSuggestion('${s.id}')" style="padding:5px 14px;background:rgba(220,53,69,0.1);border:1px solid rgba(220,53,69,0.3);border-radius:6px;color:#ff6b7a;cursor:pointer;font-size:11px;font-weight:600;font-family:inherit;">🗑️ Delete Rejected</button></div>` : ''}
           </div>`;
         }).join('');
       })()}
@@ -1759,6 +1759,19 @@ app.get('/admin/dashboard', requireAdmin, (req, res) => {
   function exportCSV(){
     var dept=document.getElementById('deptFilter').value;
     window.location.href='/api/export/feedback-csv'+(dept?'?dept='+encodeURIComponent(dept):'');
+  }
+  async function hrDeleteSuggestion(id){
+    var ov=document.createElement('div');ov.style.cssText='position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.5);z-index:99998;';
+    var t=document.createElement('div');t.style.cssText='position:fixed;top:20px;left:50%;transform:translateX(-50%);z-index:99999;background:#132a45;border:1px solid #dc3545;border-radius:12px;padding:14px 24px;display:flex;flex-direction:column;align-items:center;gap:12px;box-shadow:0 8px 30px rgba(0,0,0,0.4);max-width:500px;width:90%;animation:wfdSlideDown .3s;';
+    t.innerHTML='<span style="font-size:28px;">🗑️</span><p style="font-size:14px;color:#fff;text-align:center;">Delete this rejected suggestion permanently?</p><div style="display:flex;gap:10px;"><button id="cfmYes" style="padding:8px 20px;background:#dc3545;color:#fff;border:none;border-radius:6px;font-size:13px;font-weight:600;cursor:pointer;font-family:inherit;">Yes, Delete</button><button id="cfmNo" style="padding:8px 20px;background:#4a6a8a;color:#fff;border:none;border-radius:6px;font-size:13px;font-weight:600;cursor:pointer;font-family:inherit;">Cancel</button></div>';
+    document.body.appendChild(ov);document.body.appendChild(t);
+    t.querySelector('#cfmNo').onclick=function(){ov.remove();t.remove();};
+    t.querySelector('#cfmYes').onclick=async function(){ov.remove();t.remove();
+      try{var r=await fetch('/api/admin/delete-suggestion/'+id,{method:'DELETE'});var d=await r.json();
+        if(d.success){wfdAlert('Rejected suggestion deleted.','success',function(){location.reload();});}
+        else{wfdAlert(d.message,'error');}}
+      catch(e){wfdAlert('Network error.','error');}
+    };
   }
   async function sendReminder(){
     if(!confirm('Send reminder emails to all employees who have not submitted feedback this month?'))return;
@@ -2133,6 +2146,19 @@ app.post('/api/admin/respond-suggestion', requireAdmin, async (req, res) => {
       } catch(emailErr) { console.error('[EMAIL] Suggestion notify error:', emailErr.message); }
     }
   } catch(e) { console.error('[ERROR] Respond suggestion:', e); res.status(500).json({success:false,message:'Server error.'}); }
+});
+
+// ── DELETE REJECTED SUGGESTION (HR only) ───────────────────
+app.delete('/api/admin/delete-suggestion/:id', requireAdmin, async (req, res) => {
+  try {
+    const suggestion = db.prepare('SELECT * FROM fb_suggestions WHERE id=?').get(req.params.id);
+    if (!suggestion) return res.status(404).json({success:false,message:'Suggestion not found.'});
+    if (suggestion.status !== 'rejected') return res.status(400).json({success:false,message:'Only rejected suggestions can be deleted.'});
+    db.prepare('DELETE FROM fb_suggestions WHERE id=?').run(req.params.id);
+    try { await supabase.from('fb_suggestions').delete().eq('id', req.params.id); } catch(e) {}
+    console.log('[SUGGESTION] HR deleted rejected suggestion', req.params.id);
+    res.json({success:true});
+  } catch(e) { console.error('[ERROR] Delete suggestion:', e); res.status(500).json({success:false,message:'Server error.'}); }
 });
 
 // ── Start ───────────────────────────────────────────────────
