@@ -1094,12 +1094,14 @@ app.get('/admin/dashboard', requireAdmin, (req, res) => {
   const now = new Date();
   const allReviews = db.prepare('SELECT * FROM fb_reviews ORDER BY created_at DESC').all();
   const filteredReviews = filterDept ? allReviews.filter(r => r.department === filterDept) : allReviews;
-  const empReviews = filteredReviews.filter(r => r.reviewer_role === 'employee');
+
+  // Split into 3 categories
+  const companyReviews = filteredReviews.filter(r => r.target_type === 'company');
+  const personSupReviews = filteredReviews.filter(r => r.reviewer_role === 'employee' && r.target_type === 'supervisor');
   const supReviews = filteredReviews.filter(r => r.reviewer_role === 'supervisor');
   const allEmps = db.prepare('SELECT * FROM fb_users WHERE is_admin=0').all();
   const departments = [...new Set(allEmps.map(u => u.department))];
 
-  // Calculate averages for employee feedback
   function avg(arr, field) {
     const valid = arr.filter(r => r[field]);
     return valid.length ? (valid.reduce((s,r) => s+r[field], 0) / valid.length).toFixed(1) : '—';
@@ -1111,39 +1113,50 @@ app.get('/admin/dashboard', requireAdmin, (req, res) => {
     if (n <= 3.5) return '<span title="Average" style="font-size:16px;">&#128993;</span>';
     return '<span title="Good" style="font-size:16px;">&#128994;</span>';
   }
-  const ratingFields = [
+
+  // Company rating fields
+  const companyFields = [
     {key:'job_satisfaction', en:'Job Satisfaction', ar:'الرضا الوظيفي'},
     {key:'salary_benefits', en:'Salary & Benefits', ar:'الراتب والمزايا'},
     {key:'growth_training', en:'Growth & Training', ar:'النمو والتدريب'},
-    {key:'sup_communication', en:'Sup. Communication', ar:'تواصل المشرف'},
-    {key:'sup_support', en:'Sup. Support', ar:'دعم المشرف'},
-    {key:'sup_fairness', en:'Sup. Fairness', ar:'عدالة المشرف'},
     {key:'team_teamwork', en:'Teamwork', ar:'العمل الجماعي'},
     {key:'team_respect', en:'Respect', ar:'الاحترام'}
   ];
-  // Build insights
-  const insights = [];
-  if (empReviews.length) {
-    const fieldAvgs = ratingFields.map(f => ({...f, avg: parseFloat(avg(empReviews, f.key))})).filter(f => !isNaN(f.avg));
-    const worst = fieldAvgs.reduce((a,b) => a.avg < b.avg ? a : b, fieldAvgs[0]);
-    const best = fieldAvgs.reduce((a,b) => a.avg > b.avg ? a : b, fieldAvgs[0]);
-    if (worst && worst.avg <= 3) insights.push({type:'warn', en:`${worst.en} needs improvement (${worst.avg}/5)`, ar:`${worst.ar} يحتاج تحسين (${worst.avg}/5)`});
-    if (best && best.avg >= 3.5) insights.push({type:'good', en:`${best.en} is your strongest area (${best.avg}/5)`, ar:`${best.ar} هي أقوى نقاطكم (${best.avg}/5)`});
-    const participation = empReviews.length;
-    const totalEmp = allEmps.filter(u=>u.role==='employee').length;
-    if (totalEmp > 0) insights.push({type:'info', en:`${participation} feedback submissions from ${totalEmp} employees`, ar:`${participation} تقييم من ${totalEmp} موظف`});
-  }
-  const overallAvg = empReviews.length ? (
-    ['job_satisfaction','salary_benefits','growth_training','sup_communication','sup_support','sup_fairness','team_teamwork','team_respect']
-    .reduce((s, f) => { const v = empReviews.filter(r=>r[f]); return s + (v.length ? v.reduce((a,r)=>a+r[f],0)/v.length : 0); }, 0) / 8
-  ).toFixed(1) : '—';
+  // Person (supervisor) rating fields
+  const supervisorFields = [
+    {key:'sup_communication', en:'Communication', ar:'التواصل'},
+    {key:'sup_support', en:'Support', ar:'الدعم'},
+    {key:'sup_fairness', en:'Fairness', ar:'العدالة'}
+  ];
 
-  // Trend comparison: this month vs last month
+  // Build insights from both company + person reviews
+  const allEmpReviews = filteredReviews.filter(r => r.reviewer_role === 'employee');
+  const allFields = [...companyFields, ...supervisorFields];
+  const insights = [];
+  if (allEmpReviews.length) {
+    const fieldAvgs = allFields.map(f => ({...f, avg: parseFloat(avg(allEmpReviews, f.key))})).filter(f => !isNaN(f.avg));
+    if (fieldAvgs.length) {
+      const worst = fieldAvgs.reduce((a,b) => a.avg < b.avg ? a : b, fieldAvgs[0]);
+      const best = fieldAvgs.reduce((a,b) => a.avg > b.avg ? a : b, fieldAvgs[0]);
+      if (worst && worst.avg <= 3) insights.push({type:'warn', en:`${worst.en} needs improvement (${worst.avg}/5)`, ar:`${worst.ar} يحتاج تحسين (${worst.avg}/5)`});
+      if (best && best.avg >= 3.5) insights.push({type:'good', en:`${best.en} is your strongest area (${best.avg}/5)`, ar:`${best.ar} هي أقوى نقاطكم (${best.avg}/5)`});
+    }
+    const totalEmp = allEmps.filter(u=>u.role==='employee').length;
+    if (totalEmp > 0) insights.push({type:'info', en:`${companyReviews.length} company + ${personSupReviews.length} supervisor ratings from ${totalEmp} employees`, ar:`${companyReviews.length} تقييم شركة + ${personSupReviews.length} تقييم مشرف من ${totalEmp} موظف`});
+  }
+
+  // Overall average across all employee-submitted fields
+  const companyAvg = companyReviews.length ? (companyFields.reduce((s, f) => { const v = companyReviews.filter(r=>r[f.key]); return s + (v.length ? v.reduce((a,r)=>a+r[f.key],0)/v.length : 0); }, 0) / companyFields.length).toFixed(1) : '—';
+  const personAvg = personSupReviews.length ? (supervisorFields.reduce((s, f) => { const v = personSupReviews.filter(r=>r[f.key]); return s + (v.length ? v.reduce((a,r)=>a+r[f.key],0)/v.length : 0); }, 0) / supervisorFields.length).toFixed(1) : '—';
+
+  // Trend comparison
   const thisMonthStart = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-01`;
   const lastMonthDate = new Date(now.getFullYear(), now.getMonth()-1, 1);
   const lastMonthStart = `${lastMonthDate.getFullYear()}-${String(lastMonthDate.getMonth()+1).padStart(2,'0')}-01`;
-  const thisMonthReviews = empReviews.filter(r => r.created_at >= thisMonthStart);
-  const lastMonthReviews = empReviews.filter(r => r.created_at >= lastMonthStart && r.created_at < thisMonthStart);
+  const thisMonthCompany = companyReviews.filter(r => r.created_at >= thisMonthStart);
+  const lastMonthCompany = companyReviews.filter(r => r.created_at >= lastMonthStart && r.created_at < thisMonthStart);
+  const thisMonthPerson = personSupReviews.filter(r => r.created_at >= thisMonthStart);
+  const lastMonthPerson = personSupReviews.filter(r => r.created_at >= lastMonthStart && r.created_at < thisMonthStart);
   function trendIcon(curr, prev) {
     if (!curr || !prev || curr === '—' || prev === '—') return '';
     const c = parseFloat(curr), p = parseFloat(prev);
@@ -1169,7 +1182,7 @@ app.get('/admin/dashboard', requireAdmin, (req, res) => {
   <div class="container" style="max-width:1100px;">
     <h1 class="page-title" data-en="📊 HR Analytics" data-ar="📊 التحليلات">📊 HR Analytics</h1>
 
-    <!-- Action Bar: Department Filter + Export + Reminder -->
+    <!-- Action Bar -->
     <div style="display:flex;gap:12px;margin-bottom:20px;flex-wrap:wrap;align-items:center;">
       <div style="flex:1;min-width:200px;">
         <label style="font-size:12px;color:#a0b4cc;display:block;margin-bottom:4px;" data-en="Filter by Department" data-ar="تصفية حسب القسم">Filter by Department</label>
@@ -1193,41 +1206,68 @@ app.get('/admin/dashboard', requireAdmin, (req, res) => {
     </div>` : ''}
 
     <!-- Stats Cards -->
-    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:16px;margin-bottom:24px;">
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:16px;margin-bottom:24px;">
       <div style="background:#132a45;border:1px solid rgba(77,166,255,0.2);border-radius:12px;padding:20px;text-align:center;border-left:4px solid #4da6ff;">
-        <p style="font-size:28px;font-weight:700;color:#4da6ff;">${empReviews.length}</p>
-        <p style="font-size:12px;color:#a0b4cc;" data-en="Employee Reviews" data-ar="تقييمات الموظفين">Employee Reviews</p>
+        <p style="font-size:28px;font-weight:700;color:#4da6ff;">${companyReviews.length}</p>
+        <p style="font-size:12px;color:#a0b4cc;" data-en="🏢 Company Ratings" data-ar="🏢 تقييمات الشركة">🏢 Company Ratings</p>
+      </div>
+      <div style="background:#132a45;border:1px solid rgba(77,166,255,0.2);border-radius:12px;padding:20px;text-align:center;border-left:4px solid #b08aef;">
+        <p style="font-size:28px;font-weight:700;color:#b08aef;">${personSupReviews.length}</p>
+        <p style="font-size:12px;color:#a0b4cc;" data-en="👤 Supervisor Ratings" data-ar="👤 تقييمات المشرفين">👤 Supervisor Ratings</p>
       </div>
       <div style="background:#132a45;border:1px solid rgba(77,166,255,0.2);border-radius:12px;padding:20px;text-align:center;border-left:4px solid #6f42c1;">
         <p style="font-size:28px;font-weight:700;color:#b08aef;">${supReviews.length}</p>
-        <p style="font-size:12px;color:#a0b4cc;" data-en="Supervisor Ratings" data-ar="تقييمات المشرفين">Supervisor Ratings</p>
+        <p style="font-size:12px;color:#a0b4cc;" data-en="👔 Employee Ratings" data-ar="👔 تقييمات الموظفين">👔 Employee Ratings</p>
       </div>
       <div style="background:#132a45;border:1px solid rgba(77,166,255,0.2);border-radius:12px;padding:20px;text-align:center;border-left:4px solid #ffc107;">
-        <p style="font-size:28px;font-weight:700;color:#ffc107;">${overallAvg}</p>
-        <p style="font-size:12px;color:#a0b4cc;" data-en="Overall Average" data-ar="المعدل العام">Overall Average</p>
+        <p style="font-size:28px;font-weight:700;color:#ffc107;">${companyAvg}</p>
+        <p style="font-size:12px;color:#a0b4cc;" data-en="Company Avg" data-ar="معدل الشركة">Company Avg</p>
       </div>
       <div style="background:#132a45;border:1px solid rgba(77,166,255,0.2);border-radius:12px;padding:20px;text-align:center;border-left:4px solid #28a745;">
         <p style="font-size:28px;font-weight:700;color:#4ade80;">${allEmps.length}</p>
-        <p style="font-size:12px;color:#a0b4cc;" data-en="Total Employees" data-ar="إجمالي الموظفين">Total Employees</p>
+        <p style="font-size:12px;color:#a0b4cc;" data-en="Total Staff" data-ar="إجمالي الموظفين">Total Staff</p>
       </div>
     </div>
 
-    <!-- Section 1: Employee Feedback (Anonymous) -->
-    <div class="card">
-      <h2 class="section-title" data-en="📝 Employee → Supervisor Feedback (Anonymous)" data-ar="📝 تقييم الموظف → المشرف (مجهول)">📝 Employee → Supervisor Feedback (Anonymous)</h2>
-      ${empReviews.length === 0 ? '<p style="text-align:center;color:#a0b4cc;padding:20px;">No feedback submitted yet.</p>' : `
+    <!-- Section 1: Company Ratings (Anonymous) -->
+    <div class="card" style="border-left:4px solid #4da6ff;">
+      <h2 class="section-title" style="display:flex;align-items:center;gap:10px;">
+        <span style="font-size:22px;">🏢</span>
+        <span data-en="Company Ratings (Anonymous)" data-ar="تقييمات الشركة (مجهولة)">Company Ratings (Anonymous)</span>
+      </h2>
+      <p style="font-size:12px;color:#a0b4cc;margin-bottom:16px;" data-en="General workplace feedback — not targeted at any person" data-ar="تقييم عام عن بيئة العمل — ليس عن شخص محدد">General workplace feedback — not targeted at any person</p>
+      ${companyReviews.length === 0 ? '<p style="text-align:center;color:#a0b4cc;padding:20px;" data-en="No company ratings yet." data-ar="لا توجد تقييمات شركة بعد.">No company ratings yet.</p>' : `
       <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin-bottom:20px;">
-        ${ratingFields.map(f => `<div class="rating-tile" data-field="${f.key}" style="background:rgba(77,166,255,0.08);border-radius:10px;padding:14px;text-align:center;"><p style="font-size:11px;color:#a0b4cc;" data-en="${f.en}" data-ar="${f.ar}">${f.en}</p><p style="font-size:22px;font-weight:700;color:#ffc107;">${avg(empReviews,f.key)} ★ ${healthIcon(avg(empReviews,f.key))}</p><p style="margin-top:4px;">${lastMonthReviews.length ? `${trendIcon(avg(thisMonthReviews,f.key),avg(lastMonthReviews,f.key))} <span style="font-size:10px;color:#4a6a8a;" data-en="vs last month" data-ar="مقارنة بالشهر الماضي">vs last month</span>` : `<span style="font-size:10px;color:#4da6ff;" data-en="🆕 First month" data-ar="🆕 الشهر الأول">🆕 First month</span>`}</p></div>`).join('')}
+        ${companyFields.map(f => `<div style="background:rgba(77,166,255,0.08);border-radius:10px;padding:14px;text-align:center;"><p style="font-size:11px;color:#a0b4cc;" data-en="${f.en}" data-ar="${f.ar}">${f.en}</p><p style="font-size:22px;font-weight:700;color:#ffc107;">${avg(companyReviews,f.key)} ★ ${healthIcon(avg(companyReviews,f.key))}</p><p style="margin-top:4px;">${lastMonthCompany.length ? `${trendIcon(avg(thisMonthCompany,f.key),avg(lastMonthCompany,f.key))} <span style="font-size:10px;color:#4a6a8a;" data-en="vs last month" data-ar="مقارنة بالشهر الماضي">vs last month</span>` : `<span style="font-size:10px;color:#4da6ff;" data-en="🆕 First month" data-ar="🆕 الشهر الأول">🆕 First month</span>`}</p></div>`).join('')}
       </div>
       <h3 style="font-size:14px;color:#a0b4cc;margin-bottom:12px;" data-en="Anonymous Comments:" data-ar="التعليقات المجهولة:">Anonymous Comments:</h3>
-      ${empReviews.filter(r=>r.comment).map(r => `<div style="background:rgba(77,166,255,0.05);border-radius:8px;padding:12px;margin-bottom:8px;"><p style="font-size:13px;color:#e0eaff;">💬 ${escapeHtml(r.comment)}</p><span style="font-size:11px;color:#4a6a8a;">${r.department} · ${fmtDate(r.created_at)}</span></div>`).join('')||'<p style="color:#4a6a8a;font-size:13px;">No comments.</p>'}
+      ${companyReviews.filter(r=>r.comment).map(r => `<div style="background:rgba(77,166,255,0.05);border-radius:8px;padding:12px;margin-bottom:8px;"><p style="font-size:13px;color:#e0eaff;">💬 ${escapeHtml(r.comment)}</p><span style="font-size:11px;color:#4a6a8a;">${r.department} · ${fmtDate(r.created_at)}</span></div>`).join('')||'<p style="color:#4a6a8a;font-size:13px;">No comments.</p>'}
       `}
     </div>
 
-    <!-- Section 2: Supervisor → Employee Ratings -->
-    <div class="card">
-      <h2 class="section-title" data-en="👔 Supervisor → Employee Ratings" data-ar="👔 تقييم المشرف → الموظف">👔 Supervisor → Employee Ratings</h2>
-      ${supReviews.length === 0 ? '<p style="text-align:center;color:#a0b4cc;padding:20px;">No supervisor ratings yet.</p>' :
+    <!-- Section 2: Employee → Supervisor Ratings (Anonymous) -->
+    <div class="card" style="border-left:4px solid #b08aef;">
+      <h2 class="section-title" style="display:flex;align-items:center;gap:10px;">
+        <span style="font-size:22px;">👤</span>
+        <span data-en="Employee → Supervisor Ratings (Anonymous)" data-ar="تقييم الموظف → المشرف (مجهول)">Employee → Supervisor Ratings (Anonymous)</span>
+      </h2>
+      <p style="font-size:12px;color:#a0b4cc;margin-bottom:16px;" data-en="Employees rate specific supervisors — anonymous to HR" data-ar="الموظفون يقيّمون مشرفين محددين — مجهول للموارد البشرية">Employees rate specific supervisors — anonymous to HR</p>
+      ${personSupReviews.length === 0 ? '<p style="text-align:center;color:#a0b4cc;padding:20px;" data-en="No supervisor ratings yet." data-ar="لا توجد تقييمات مشرفين بعد.">No supervisor ratings yet.</p>' : `
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin-bottom:20px;">
+        ${supervisorFields.map(f => `<div style="background:rgba(176,138,239,0.08);border-radius:10px;padding:14px;text-align:center;"><p style="font-size:11px;color:#a0b4cc;" data-en="${f.en}" data-ar="${f.ar}">${f.en}</p><p style="font-size:22px;font-weight:700;color:#ffc107;">${avg(personSupReviews,f.key)} ★ ${healthIcon(avg(personSupReviews,f.key))}</p><p style="margin-top:4px;">${lastMonthPerson.length ? `${trendIcon(avg(thisMonthPerson,f.key),avg(lastMonthPerson,f.key))} <span style="font-size:10px;color:#4a6a8a;" data-en="vs last month" data-ar="مقارنة بالشهر الماضي">vs last month</span>` : `<span style="font-size:10px;color:#4da6ff;" data-en="🆕 First month" data-ar="🆕 الشهر الأول">🆕 First month</span>`}</p></div>`).join('')}
+      </div>
+      <h3 style="font-size:14px;color:#a0b4cc;margin-bottom:12px;" data-en="Anonymous Comments:" data-ar="التعليقات المجهولة:">Anonymous Comments:</h3>
+      ${personSupReviews.filter(r=>r.comment).map(r => { const tgt = r.target_id ? getUserById.get(r.target_id) : null; return `<div style="background:rgba(176,138,239,0.05);border-radius:8px;padding:12px;margin-bottom:8px;"><p style="font-size:13px;color:#e0eaff;">💬 ${escapeHtml(r.comment)}</p><span style="font-size:11px;color:#4a6a8a;">${r.department} · ${tgt?escapeHtml(tgt.full_name):''} · ${fmtDate(r.created_at)}</span></div>`; }).join('')||'<p style="color:#4a6a8a;font-size:13px;">No comments.</p>'}
+      `}
+    </div>
+
+    <!-- Section 3: Supervisor → Employee Ratings -->
+    <div class="card" style="border-left:4px solid #6f42c1;">
+      <h2 class="section-title" style="display:flex;align-items:center;gap:10px;">
+        <span style="font-size:22px;">👔</span>
+        <span data-en="Supervisor → Employee Ratings" data-ar="تقييم المشرف → الموظف">Supervisor → Employee Ratings</span>
+      </h2>
+      ${supReviews.length === 0 ? '<p style="text-align:center;color:#a0b4cc;padding:20px;" data-en="No supervisor ratings yet." data-ar="لا توجد تقييمات بعد.">No supervisor ratings yet.</p>' :
         supReviews.map(r => {
           const emp = getUserById.get(r.target_id);
           return `<div class="emp-card">
