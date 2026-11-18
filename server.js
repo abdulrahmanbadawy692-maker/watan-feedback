@@ -68,6 +68,9 @@ db.exec(`CREATE TABLE IF NOT EXISTS fb_suggestions (
   id TEXT PRIMARY KEY,
   department TEXT NOT NULL,
   suggestion TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'pending',
+  hr_comment TEXT,
+  responded_at TEXT,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 )`);
 
@@ -119,7 +122,7 @@ async function loadFromSupabase() {
     try {
       const { data: suggestions } = await supabase.from('fb_suggestions').select('*');
       for (const s of (suggestions||[])) {
-        try { db.prepare('INSERT OR REPLACE INTO fb_suggestions (id,department,suggestion,created_at) VALUES (?,?,?,?)').run(s.id,s.department,s.suggestion,s.created_at); rs++; } catch(e) {}
+        try { db.prepare('INSERT OR REPLACE INTO fb_suggestions (id,department,suggestion,status,hr_comment,responded_at,created_at) VALUES (?,?,?,?,?,?,?)').run(s.id,s.department,s.suggestion,s.status||'pending',s.hr_comment||null,s.responded_at||null,s.created_at); rs++; } catch(e) {}
       }
     } catch(e) { console.log('[DB] fb_suggestions not in Supabase yet'); }
     console.log(`[DB] ✅ Loaded ${ru} users, ${rr} reviews, ${rd} departments, ${rs} suggestions`);
@@ -946,11 +949,15 @@ app.get('/suggestions', requireAuth, (req, res) => {
       <h2 class="section-title" data-en="Submit a Suggestion" data-ar="أرسل اقتراحاً">Submit a Suggestion</h2>
       <div class="trust-banner">
         <p data-en="🔒 100% anonymous — your name is never recorded or shown" data-ar="🔒 مجهول تماماً — لن يُسجّل أو يُظهر اسمك أبداً">🔒 100% anonymous — your name is never recorded or shown</p>
-        <span data-en="Submit anytime — no monthly limit" data-ar="أرسل في أي وقت — بدون حد شهري">Submit anytime — no monthly limit</span>
+        <span data-en="Submit anytime — no monthly limit. Grammar doesn't matter — we care about your idea!" data-ar="أرسل في أي وقت — بدون حد شهري. لا تهتم بالقواعد — نهتم بفكرتك!">Submit anytime — no monthly limit. Grammar doesn't matter — we care about your idea!</span>
       </div>
       <div class="form-group">
         <label data-en="💬 Your suggestion, idea, or feedback" data-ar="💬 اقتراحك أو فكرتك أو ملاحظتك">💬 Your suggestion, idea, or feedback</label>
-        <textarea id="suggestionText" style="min-height:120px;" placeholder="What would you change? Any ideas to improve the company?"></textarea>
+        <div style="position:relative;">
+          <textarea id="suggestionText" style="min-height:120px;padding-right:50px;" placeholder="What would you change? Any ideas to improve the company?"></textarea>
+          <button id="micBtn" onclick="toggleMic()" title="Speech to text" style="position:absolute;right:10px;top:10px;width:36px;height:36px;border-radius:50%;border:2px solid rgba(77,166,255,0.3);background:rgba(77,166,255,0.08);color:#4da6ff;cursor:pointer;font-size:18px;display:flex;align-items:center;justify-content:center;transition:all .2s;">🎤</button>
+        </div>
+        <p id="micStatus" style="font-size:11px;color:#4a6a8a;margin-top:4px;display:none;"></p>
       </div>
       <button class="btn btn-full" style="background:linear-gradient(135deg,#ffc107,#e6a800);" onclick="submitSuggestion()" data-en="Submit Suggestion" data-ar="إرسال الاقتراح">Submit Suggestion</button>
     </div>
@@ -959,15 +966,38 @@ app.get('/suggestions', requireAuth, (req, res) => {
       <h2 class="section-title" data-en="📋 Recent Suggestions (${escapeHtml(dbUser.department)})" data-ar="📋 الاقتراحات الأخيرة (${escapeHtml(dbUser.department)})">📋 Recent Suggestions (${escapeHtml(dbUser.department)})</h2>
       <p style="font-size:12px;color:#a0b4cc;margin-bottom:16px;" data-en="All suggestions from your department — completely anonymous" data-ar="جميع الاقتراحات من قسمك — مجهولة تماماً">All suggestions from your department — completely anonymous</p>
       ${mySuggestions.length === 0 ? '<p style="text-align:center;color:#4a6a8a;padding:20px;" data-en="No suggestions yet. Be the first!" data-ar="لا توجد اقتراحات بعد. كن الأول!">No suggestions yet. Be the first!</p>' :
-        mySuggestions.slice(0,20).map(s => `<div style="background:rgba(255,193,7,0.05);border:1px solid rgba(255,193,7,0.15);border-radius:10px;padding:14px;margin-bottom:10px;">
-          <p style="font-size:14px;color:#e0eaff;line-height:1.5;">💡 ${escapeHtml(s.suggestion)}</p>
-          <span style="font-size:11px;color:#4a6a8a;">${fmtDate(s.created_at)}</span>
-        </div>`).join('')}
+        mySuggestions.slice(0,20).map(s => {
+          const statusBadge = s.status==='accepted' ? '<span style="display:inline-block;padding:2px 10px;border-radius:12px;font-size:11px;font-weight:700;background:rgba(40,167,69,0.15);color:#4ade80;">✅ Accepted</span>'
+            : s.status==='rejected' ? '<span style="display:inline-block;padding:2px 10px;border-radius:12px;font-size:11px;font-weight:700;background:rgba(220,53,69,0.15);color:#ff6b7a;">❌ Rejected</span>'
+            : '<span style="display:inline-block;padding:2px 10px;border-radius:12px;font-size:11px;font-weight:700;background:rgba(255,193,7,0.15);color:#ffc107;">🟡 Pending</span>';
+          const borderColor = s.status==='accepted' ? 'rgba(40,167,69,0.3)' : s.status==='rejected' ? 'rgba(220,53,69,0.2)' : 'rgba(255,193,7,0.15)';
+          return `<div style="background:rgba(255,193,7,0.03);border:1px solid ${borderColor};border-radius:10px;padding:14px;margin-bottom:10px;">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">${statusBadge}<span style="font-size:11px;color:#4a6a8a;">${fmtDate(s.created_at)}</span></div>
+            <p style="font-size:14px;color:#e0eaff;line-height:1.5;">💡 ${escapeHtml(s.suggestion)}</p>
+            ${s.hr_comment ? `<div style="margin-top:10px;padding:10px;background:rgba(77,166,255,0.06);border-radius:8px;border-left:3px solid ${s.status==='accepted'?'#4ade80':'#ff6b7a'};"><p style="font-size:12px;color:#a0b4cc;margin-bottom:4px;font-weight:600;" data-en="HR Response:" data-ar="رد الموارد البشرية:">HR Response:</p><p style="font-size:13px;color:#e0eaff;">${escapeHtml(s.hr_comment)}</p></div>` : ''}
+          </div>`;
+        }).join('')}
     </div>
   </div>
   ${footerHTML()}
   <script>
+  var micListening=false,recognition=null;
+  function toggleMic(){
+    var btn=document.getElementById('micBtn'),st=document.getElementById('micStatus'),ta=document.getElementById('suggestionText');
+    if(!('webkitSpeechRecognition' in window)&&!('SpeechRecognition' in window)){wfdAlert('Speech recognition is not supported in your browser. Please use Chrome.','error');return;}
+    if(micListening){recognition.stop();return;}
+    recognition=new(window.SpeechRecognition||window.webkitSpeechRecognition)();
+    recognition.lang=wfdLang==='ar'?'ar-SA':'en-US';
+    recognition.continuous=true;recognition.interimResults=true;
+    var finalText=ta.value;
+    recognition.onstart=function(){micListening=true;btn.style.background='rgba(220,53,69,0.3)';btn.style.borderColor='#dc3545';btn.textContent='⏹';st.style.display='block';st.textContent=wfdLang==='ar'?'🔴 جارٍ الاستماع... انقر لإيقاف':'🔴 Listening... click to stop';st.style.color='#ff6b7a';};
+    recognition.onresult=function(e){var interim='';for(var i=e.resultIndex;i<e.results.length;i++){if(e.results[i].isFinal){finalText+=(finalText?' ':'')+e.results[i][0].transcript;}else{interim+=e.results[i][0].transcript;}}ta.value=finalText+(interim?' '+interim:'');};
+    recognition.onerror=function(e){console.log('Speech error:',e.error);if(e.error!=='no-speech')wfdAlert('Microphone error: '+e.error,'error');};
+    recognition.onend=function(){micListening=false;btn.style.background='rgba(77,166,255,0.08)';btn.style.borderColor='rgba(77,166,255,0.3)';btn.textContent='🎤';st.style.display='none';finalText=ta.value;};
+    recognition.start();
+  }
   async function submitSuggestion(){
+    if(micListening&&recognition)recognition.stop();
     var text=document.getElementById('suggestionText').value.trim();
     if(!text){wfdAlert('Please write your suggestion.','error');return;}
     if(text.length<10){wfdAlert('Please write at least 10 characters.','error');return;}
@@ -1556,17 +1586,56 @@ app.get('/admin/dashboard', requireAdmin, (req, res) => {
         const allSuggestions = filterDept
           ? db.prepare('SELECT * FROM fb_suggestions WHERE department=? ORDER BY created_at DESC').all(filterDept)
           : db.prepare('SELECT * FROM fb_suggestions ORDER BY created_at DESC').all();
-        return allSuggestions.length === 0
-          ? '<p style="text-align:center;color:#a0b4cc;padding:20px;" data-en="No suggestions yet." data-ar="لا توجد اقتراحات بعد.">No suggestions yet.</p>'
-          : allSuggestions.slice(0,30).map(s => `<div style="background:rgba(255,193,7,0.05);border:1px solid rgba(255,193,7,0.15);border-radius:10px;padding:14px;margin-bottom:10px;">
-              <p style="font-size:14px;color:#e0eaff;line-height:1.5;">💡 ${escapeHtml(s.suggestion)}</p>
-              <span style="font-size:11px;color:#4a6a8a;">${escapeHtml(s.department)} · ${fmtDate(s.created_at)}</span>
-            </div>`).join('');
+        if (allSuggestions.length === 0) return '<p style="text-align:center;color:#a0b4cc;padding:20px;" data-en="No suggestions yet." data-ar="لا توجد اقتراحات بعد.">No suggestions yet.</p>';
+        return allSuggestions.slice(0,30).map(s => {
+          const statusBadge = s.status==='accepted' ? '<span style="display:inline-block;padding:2px 10px;border-radius:12px;font-size:11px;font-weight:700;background:rgba(40,167,69,0.15);color:#4ade80;">✅ Accepted</span>'
+            : s.status==='rejected' ? '<span style="display:inline-block;padding:2px 10px;border-radius:12px;font-size:11px;font-weight:700;background:rgba(220,53,69,0.15);color:#ff6b7a;">❌ Rejected</span>'
+            : '<span style="display:inline-block;padding:2px 10px;border-radius:12px;font-size:11px;font-weight:700;background:rgba(255,193,7,0.15);color:#ffc107;">🟡 Pending</span>';
+          const borderColor = s.status==='accepted' ? 'rgba(40,167,69,0.3)' : s.status==='rejected' ? 'rgba(220,53,69,0.2)' : 'rgba(255,193,7,0.15)';
+          return `<div style="background:rgba(255,193,7,0.03);border:1px solid ${borderColor};border-radius:10px;padding:14px;margin-bottom:12px;">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;flex-wrap:wrap;gap:6px;">${statusBadge}<span style="font-size:11px;color:#4a6a8a;">${escapeHtml(s.department)} · ${fmtDate(s.created_at)}</span></div>
+            <p style="font-size:14px;color:#e0eaff;line-height:1.5;">💡 ${escapeHtml(s.suggestion)}</p>
+            ${s.hr_comment ? `<div style="margin-top:10px;padding:10px;background:rgba(77,166,255,0.06);border-radius:8px;border-left:3px solid ${s.status==='accepted'?'#4ade80':'#ff6b7a'};"><p style="font-size:12px;color:#a0b4cc;margin-bottom:4px;font-weight:600;">HR Response:</p><p style="font-size:13px;color:#e0eaff;">${escapeHtml(s.hr_comment)}</p></div>` : ''}
+            ${s.status==='pending' ? `<div id="actions_${s.id}" style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap;">
+              <button onclick="showRespondBox('${s.id}','accepted')" style="padding:6px 16px;background:rgba(40,167,69,0.15);border:1px solid rgba(40,167,69,0.4);border-radius:8px;color:#4ade80;cursor:pointer;font-size:12px;font-weight:700;font-family:inherit;">✅ Accept</button>
+              <button onclick="showRespondBox('${s.id}','rejected')" style="padding:6px 16px;background:rgba(220,53,69,0.15);border:1px solid rgba(220,53,69,0.4);border-radius:8px;color:#ff6b7a;cursor:pointer;font-size:12px;font-weight:700;font-family:inherit;">❌ Reject</button>
+            </div>
+            <div id="respond_${s.id}" style="display:none;margin-top:12px;padding:14px;background:rgba(77,166,255,0.05);border-radius:10px;">
+              <p id="respondLabel_${s.id}" style="font-size:13px;font-weight:600;margin-bottom:8px;"></p>
+              <textarea id="respondComment_${s.id}" style="width:100%;padding:10px;font-size:13px;color:#fff;background:#0f2035;border:1.5px solid rgba(77,166,255,0.2);border-radius:8px;font-family:inherit;min-height:70px;box-sizing:border-box;" placeholder="Your comment..."></textarea>
+              <div style="margin-top:8px;display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+                <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:12px;color:#a0b4cc;"><input type="checkbox" id="sendAll_${s.id}" style="accent-color:#4da6ff;"> <span data-en="Send email to ALL departments" data-ar="إرسال بريد لجميع الأقسام">Send email to ALL departments</span></label>
+                <button onclick="submitResponse('${s.id}')" class="btn" style="padding:8px 20px;font-size:13px;">Submit</button>
+                <button onclick="document.getElementById('respond_${s.id}').style.display='none';document.getElementById('actions_${s.id}').style.display='flex';" style="padding:8px 16px;background:#4a6a8a;color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:12px;font-family:inherit;">Cancel</button>
+              </div>
+            </div>` : ''}
+          </div>`;
+        }).join('');
       })()}
     </div>
   </div>
   ${footerHTML()}
   <script>
+  var currentRespondStatus={};
+  function showRespondBox(id,status){
+    currentRespondStatus[id]=status;
+    document.getElementById('actions_'+id).style.display='none';
+    var box=document.getElementById('respond_'+id);box.style.display='block';
+    var label=document.getElementById('respondLabel_'+id);
+    if(status==='accepted'){label.textContent='✅ Accept — How long will it take to implement?';label.style.color='#4ade80';}
+    else{label.textContent='❌ Reject — Why is this suggestion not feasible?';label.style.color='#ff6b7a';}
+    document.getElementById('respondComment_'+id).focus();
+  }
+  async function submitResponse(id){
+    var status=currentRespondStatus[id];
+    var comment=document.getElementById('respondComment_'+id).value.trim();
+    if(!comment){wfdAlert('Please write a comment.','error');return;}
+    var sendAll=document.getElementById('sendAll_'+id).checked;
+    try{var r=await fetch('/api/admin/respond-suggestion',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:id,status:status,hr_comment:comment,send_all:sendAll})});var d=await r.json();
+      if(d.success){wfdAlert('Response submitted!'+(status==='accepted'?' Email sent to department.':''),'success',function(){location.reload();});}
+      else{wfdAlert(d.message||'Error.','error');}}
+    catch(e){wfdAlert('Network error.','error');}
+  }
   function filterByDept(){
     var dept=document.getElementById('deptFilter').value;
     window.location.href='/admin/dashboard'+(dept?'?dept='+encodeURIComponent(dept):'');
@@ -1904,6 +1973,50 @@ app.post('/api/admin/send-reminder', requireAdmin, async (req, res) => {
     }
     res.json({success:true, message:`Reminders sent to ${sentCount} employee(s) who haven't submitted feedback this month.`});
   } catch(e) { console.error('[ERROR] Send reminder:', e); res.status(500).json({success:false,message:'Failed to send reminders.'}); }
+});
+
+// ── RESPOND TO SUGGESTION (HR Accept/Reject) ──────────────
+app.post('/api/admin/respond-suggestion', requireAdmin, async (req, res) => {
+  try {
+    const { id, status, hr_comment, send_all } = req.body;
+    if (!id || !status || !hr_comment) return res.status(400).json({success:false,message:'Missing fields.'});
+    if (status !== 'accepted' && status !== 'rejected') return res.status(400).json({success:false,message:'Invalid status.'});
+    const suggestion = db.prepare('SELECT * FROM fb_suggestions WHERE id=?').get(id);
+    if (!suggestion) return res.status(404).json({success:false,message:'Suggestion not found.'});
+    const respondedAt = new Date().toISOString();
+    db.prepare('UPDATE fb_suggestions SET status=?, hr_comment=?, responded_at=? WHERE id=?').run(status, hr_comment, respondedAt, id);
+    cloudUpdate('fb_suggestions', id, {status, hr_comment, responded_at: respondedAt});
+    res.json({success:true});
+    console.log(`[SUGGESTION] ${status} suggestion ${id} from ${suggestion.department}`);
+
+    // Send email to department (or all) on ACCEPT only
+    if (status === 'accepted') {
+      try {
+        const recipients = send_all
+          ? db.prepare('SELECT * FROM fb_users WHERE is_admin=0').all()
+          : db.prepare('SELECT * FROM fb_users WHERE department=? AND is_admin=0').all(suggestion.department);
+        const emailHtml = `<div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;background:#0a1628;color:#fff;padding:30px;border-radius:12px;">
+          <h2 style="color:#4ade80;">💡 Suggestion Accepted!</h2>
+          <p style="color:#a0b4cc;">A suggestion from the <strong>${suggestion.department}</strong> department has been approved:</p>
+          <div style="background:#0f2035;border:1px solid rgba(74,222,128,0.3);border-radius:10px;padding:16px;margin:16px 0;">
+            <p style="font-size:15px;color:#e0eaff;line-height:1.5;font-style:italic;">"${suggestion.suggestion}"</p>
+          </div>
+          <div style="background:rgba(74,222,128,0.08);border-radius:8px;padding:12px;margin:12px 0;">
+            <p style="font-size:12px;color:#4ade80;font-weight:600;margin-bottom:4px;">HR Response:</p>
+            <p style="font-size:14px;color:#e0eaff;">${hr_comment}</p>
+          </div>
+          <p style="color:#a0b4cc;font-size:13px;margin-top:16px;">Visit the Suggestion Box to see all updates.</p>
+          <p style="font-size:12px;color:#4a6a8a;margin-top:16px;">Watan First Digital Feedback System</p>
+        </div>`;
+        let sent = 0;
+        for (const emp of recipients) {
+          await sendBrevoEmail(emp.email, 'Suggestion Accepted — Watan First Digital', emailHtml);
+          sent++;
+        }
+        console.log(`[EMAIL] Suggestion accepted email sent to ${sent} people (${send_all?'all departments':suggestion.department})`);
+      } catch(emailErr) { console.error('[EMAIL] Suggestion notify error:', emailErr.message); }
+    }
+  } catch(e) { console.error('[ERROR] Respond suggestion:', e); res.status(500).json({success:false,message:'Server error.'}); }
 });
 
 // ── Start ───────────────────────────────────────────────────
