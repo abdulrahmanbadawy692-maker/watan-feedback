@@ -207,16 +207,19 @@ function darkModeScript() {
   return `<script>
   var dm=localStorage.getItem('wfd_dm')||'dark';
   function applyDM(m){dm=m;localStorage.setItem('wfd_dm',m);
-    if(m==='light'){document.body.classList.add('light-mode');}
-    else{document.body.classList.remove('light-mode');}
-    document.addEventListener('DOMContentLoaded',function(){
-      document.querySelectorAll('[style*="color:#fff"],h1,h2,h3,h4,p,span,label,a,td,th,li,button').forEach(function(el){
-        var cs=getComputedStyle(el);if(cs.color==='rgb(255, 255, 255)'||cs.color==='rgb(240, 246, 255)'){el.classList.add('dc');}
-      });
-    });
+    if(document.body){
+      if(m==='light'){document.body.classList.add('light-mode');}
+      else{document.body.classList.remove('light-mode');}
+    }
+    if(document.documentElement){
+      document.documentElement.setAttribute('data-theme',m);
+    }
   }
   function toggleDM(){applyDM(dm==='dark'?'light':'dark');}
-  applyDM(dm);
+  // Apply immediately to <html> so CSS kicks in before body renders
+  if(document.documentElement)document.documentElement.setAttribute('data-theme',dm);
+  // Apply again when body is ready
+  document.addEventListener('DOMContentLoaded',function(){applyDM(dm);});
   </script>`;
 }
 function darkToggleBtn() { return `<button onclick="toggleDM()" style="padding:8px 14px;border-radius:8px;border:1px solid rgba(77,166,255,0.3);background:rgba(77,166,255,0.08);color:#4da6ff;cursor:pointer;font-size:13px;font-weight:600;font-family:inherit;" data-en="☀️/🌙" data-ar="☀️/🌙">☀️/🌙</button>`; }
@@ -238,12 +241,38 @@ function accessibilityJS() {
 
 function lightModeCSS() {
   return `
-    body.light-mode{background:#f5f5f0 !important;color:#1a1a2e !important;}
+    html[data-theme="light"] body,body.light-mode{background:#f5f5f0 !important;color:#1a1a2e !important;}
+    body.light-mode::before{background:none !important;}
     body.light-mode .dc{color:#1a1a2e !important;}
     body.light-mode .header,body.light-mode .hdr{background:#ffffff !important;border-bottom-color:#d0d0c8 !important;}
     body.light-mode .header a.brand h1,body.light-mode .hdr h1{color:#1a1a2e !important;}
     body.light-mode input,body.light-mode select,body.light-mode textarea{background:#fff !important;color:#1a1a2e !important;border-color:#c0c8d0 !important;}
     body.light-mode .card,body.light-mode .form-card{background:#ffffff !important;border-color:#d0d0c8 !important;}
+    body.light-mode .emp-card{background:#f0f4f8 !important;border-color:#d0d0c8 !important;}
+    body.light-mode .trust-banner{background:rgba(40,167,69,0.08) !important;border-color:rgba(40,167,69,0.2) !important;}
+    body.light-mode .section-title{color:#1a1a2e !important;border-bottom-color:#d0d0c8 !important;}
+    body.light-mode .page-title{color:#1a1a2e !important;}
+    body.light-mode h1,body.light-mode h2,body.light-mode h3{color:#1a1a2e !important;}
+    body.light-mode p,body.light-mode span,body.light-mode label,body.light-mode div{color:inherit;}
+    body.light-mode [style*="color:#fff"]{color:#1a1a2e !important;}
+    body.light-mode [style*="color:#e0eaff"]{color:#2a2a3e !important;}
+    body.light-mode [style*="color:#a0b4cc"]{color:#4a5568 !important;}
+    body.light-mode [style*="color:#4a6a8a"]{color:#6b7280 !important;}
+    body.light-mode [style*="background:#132a45"]{background:#ffffff !important;border-color:#d0d0c8 !important;}
+    body.light-mode [style*="background:#0f2035"]{background:#f0f4f8 !important;}
+    body.light-mode [style*="background:#0a1628"]{background:#f5f5f0 !important;}
+    body.light-mode [style*="background:rgba(77,166,255,0.08)"]{background:rgba(77,166,255,0.06) !important;}
+    body.light-mode [style*="background:rgba(77,166,255,0.05)"]{background:rgba(77,166,255,0.04) !important;}
+    body.light-mode [style*="background:rgba(255,193,7,0.05)"]{background:rgba(255,193,7,0.06) !important;}
+    body.light-mode [style*="background:rgba(255,193,7,0.03)"]{background:rgba(255,193,7,0.04) !important;}
+    body.light-mode [style*="background:rgba(176,138,239,0.08)"]{background:rgba(176,138,239,0.06) !important;}
+    body.light-mode [style*="background:rgba(176,138,239,0.05)"]{background:rgba(176,138,239,0.04) !important;}
+    body.light-mode [style*="background:rgba(74,222,128,0.06)"]{background:rgba(74,222,128,0.08) !important;}
+    body.light-mode [style*="background:rgba(77,166,255,0.06)"]{background:rgba(77,166,255,0.04) !important;}
+    body.light-mode .rating-label{color:#4a5568 !important;}
+    body.light-mode .star{color:#c0c8d0 !important;}
+    body.light-mode .star.active{color:#ffc107 !important;}
+    body.light-mode .header-nav a,body.light-mode .header-nav button{background:rgba(77,166,255,0.06) !important;border-color:rgba(77,166,255,0.2) !important;}
   `;
 }
 function accessibilityCSS() {
