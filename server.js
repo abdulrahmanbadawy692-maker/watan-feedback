@@ -773,11 +773,19 @@ app.get('/dashboard', requireAuth, (req, res) => {
     catch(e){wfdAlert('Network error.','error');}
   }
   async function deleteRating(reviewId,name){
-    if(!confirm('Delete your rating for "'+name+'"?'))return;
-    try{var r=await fetch('/api/feedback/delete-rating/'+reviewId,{method:'DELETE'});var d=await r.json();
-      if(d.success){wfdAlert('Rating for '+name+' deleted. You can rate again.','success',function(){location.reload();});}
-      else{wfdAlert(d.message,'error');}}
-    catch(e){wfdAlert('Network error.','error');}
+    // Custom confirm using wfdAlert overlay
+    var ov=document.createElement('div');ov.style.cssText='position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.5);z-index:99998;';
+    var t=document.createElement('div');t.style.cssText='position:fixed;top:20px;left:50%;transform:translateX(-50%);z-index:99999;background:#132a45;border:1px solid #ffc107;border-radius:12px;padding:14px 24px;display:flex;flex-direction:column;align-items:center;gap:12px;box-shadow:0 8px 30px rgba(0,0,0,0.4);max-width:500px;width:90%;animation:wfdSlideDown .3s;';
+    t.innerHTML='<span style="font-size:28px;">⚠️</span><p style="font-size:14px;color:#fff;text-align:center;">Delete your rating for <strong>"'+name+'"</strong>?</p><div style="display:flex;gap:10px;"><button id="cfmYes" style="padding:8px 20px;background:#dc3545;color:#fff;border:none;border-radius:6px;font-size:13px;font-weight:600;cursor:pointer;font-family:inherit;">Yes, Delete</button><button id="cfmNo" style="padding:8px 20px;background:#4a6a8a;color:#fff;border:none;border-radius:6px;font-size:13px;font-weight:600;cursor:pointer;font-family:inherit;">Cancel</button></div>';
+    document.body.appendChild(ov);document.body.appendChild(t);
+    t.querySelector('#cfmNo').onclick=function(){ov.remove();t.remove();};
+    t.querySelector('#cfmYes').onclick=async function(){
+      ov.remove();t.remove();
+      try{var r=await fetch('/api/feedback/delete-rating/'+reviewId,{method:'DELETE'});var d=await r.json();
+        if(d.success){wfdAlert('Rating for '+name+' deleted. You can rate again.','success',function(){location.reload();});}
+        else{wfdAlert(d.message||'Could not delete.','error');}}
+      catch(e){wfdAlert('Network error: '+e.message,'error');}
+    };
   }
   </script></body></html>`);
 });
