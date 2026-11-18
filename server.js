@@ -1415,7 +1415,7 @@ app.get('/admin/login', (req, res) => {
   async function adminLogin(){var e=document.getElementById('aEmail').value,p=document.getElementById('aPass').value,err=document.getElementById('aErr');
     err.classList.remove('show');
     try{var r=await fetch('/api/admin-login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email:e,password:p})});var d=await r.json();
-      if(d.success){window.location.href='/admin/dashboard';}else{err.textContent=d.message;err.classList.add('show');}}
+      if(d.success){sessionStorage.setItem('wfd_admin_session','1');window.location.href='/admin/dashboard';}else{err.textContent=d.message;err.classList.add('show');}}
     catch(x){err.textContent='Error.';err.classList.add('show');}}
   </script></body></html>`);
 });
@@ -1558,6 +1558,7 @@ app.get('/admin/dashboard', requireAdmin, (req, res) => {
     </div>
   </header>
   ${accessibilityHTML()}${accessibilityJS()}
+  <script>(function(){if(!sessionStorage.getItem('wfd_admin_session')){window.location.href='/admin/logout';return;}})();</script>
   <div class="container" style="max-width:1100px;">
     <h1 class="page-title" data-en="📊 HR Analytics" data-ar="📊 التحليلات">📊 HR Analytics</h1>
 
@@ -1831,6 +1832,7 @@ app.get('/admin/manage', requireAdmin, (req, res) => {
     </div>
   </header>
   ${accessibilityHTML()}${accessibilityJS()}
+  <script>(function(){if(!sessionStorage.getItem('wfd_admin_session')){window.location.href='/admin/logout';return;}})();</script>
   <div class="container" style="max-width:900px;">
     <h1 class="page-title" data-en="👥 Manage Users" data-ar="👥 إدارة المستخدمين">👥 Manage Users</h1>
 
