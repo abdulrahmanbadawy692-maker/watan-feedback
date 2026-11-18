@@ -68,11 +68,21 @@ db.exec(`CREATE TABLE IF NOT EXISTS fb_suggestions (
   id TEXT PRIMARY KEY,
   department TEXT NOT NULL,
   suggestion TEXT NOT NULL,
-  status TEXT NOT NULL DEFAULT 'pending',
+  status TEXT NOT NULL DEFAULT 'draft',
   hr_comment TEXT,
   responded_at TEXT,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 )`);
+// Helper: auto-confirm drafts older than 1 hour
+function autoConfirmDrafts() {
+  const oneHourAgo = new Date(Date.now() - 60*60*1000).toISOString();
+  const drafts = db.prepare("SELECT id FROM fb_suggestions WHERE status='draft' AND created_at<=?").all(oneHourAgo);
+  for (const d of drafts) {
+    db.prepare("UPDATE fb_suggestions SET status='pending' WHERE id=?").run(d.id);
+    cloudUpdate('fb_suggestions', d.id, {status:'pending'});
+  }
+  if (drafts.length) console.log(`[SUGGESTIONS] Auto-confirmed ${drafts.length} draft(s)`);
+}
 
 // ── Supabase Cloud Sync ─────────────────────────────────────
 async function cloudInsert(table, row) {
@@ -938,6 +948,8 @@ app.get('/profile', requireAuth, (req, res) => {
 app.get('/suggestions', requireAuth, (req, res) => {
   const user = req.session.user;
   const dbUser = getUserById.get(user.id);
+  const now = new Date();
+  autoConfirmDrafts(); // Auto-confirm any drafts older than 1 hour
   const mySuggestions = db.prepare('SELECT * FROM fb_suggestions WHERE department=? ORDER BY created_at DESC').all(dbUser.department);
   res.send(`${pageHead('Suggestion Box')}
   <body>
@@ -967,13 +979,33 @@ app.get('/suggestions', requireAuth, (req, res) => {
       <p style="font-size:12px;color:#a0b4cc;margin-bottom:16px;" data-en="All suggestions from your department — completely anonymous" data-ar="جميع الاقتراحات من قسمك — مجهولة تماماً">All suggestions from your department — completely anonymous</p>
       ${mySuggestions.length === 0 ? '<p style="text-align:center;color:#4a6a8a;padding:20px;" data-en="No suggestions yet. Be the first!" data-ar="لا توجد اقتراحات بعد. كن الأول!">No suggestions yet. Be the first!</p>' :
         mySuggestions.slice(0,20).map(s => {
-          const statusBadge = s.status==='accepted' ? '<span style="display:inline-block;padding:2px 10px;border-radius:12px;font-size:11px;font-weight:700;background:rgba(40,167,69,0.15);color:#4ade80;">✅ Accepted</span>'
+          const ca = s.created_at || '';
+          const submittedAt = new Date(ca.includes('Z') || ca.includes('+') ? ca : ca + 'Z');
+          const hoursSince = isNaN(submittedAt.getTime()) ? 999 : (now.getTime() - submittedAt.getTime()) / (1000*60*60);
+          const isDraft = s.status === 'draft' && hoursSince <= 1;
+          const statusBadge = isDraft ? '<span style="display:inline-block;padding:2px 10px;border-radius:12px;font-size:11px;font-weight:700;background:rgba(77,166,255,0.15);color:#4da6ff;">⏳ Draft</span>'
+            : s.status==='accepted' ? '<span style="display:inline-block;padding:2px 10px;border-radius:12px;font-size:11px;font-weight:700;background:rgba(40,167,69,0.15);color:#4ade80;">✅ Accepted</span>'
             : s.status==='rejected' ? '<span style="display:inline-block;padding:2px 10px;border-radius:12px;font-size:11px;font-weight:700;background:rgba(220,53,69,0.15);color:#ff6b7a;">❌ Rejected</span>'
             : '<span style="display:inline-block;padding:2px 10px;border-radius:12px;font-size:11px;font-weight:700;background:rgba(255,193,7,0.15);color:#ffc107;">🟡 Pending</span>';
-          const borderColor = s.status==='accepted' ? 'rgba(40,167,69,0.3)' : s.status==='rejected' ? 'rgba(220,53,69,0.2)' : 'rgba(255,193,7,0.15)';
+          const borderColor = isDraft ? 'rgba(77,166,255,0.3)' : s.status==='accepted' ? 'rgba(40,167,69,0.3)' : s.status==='rejected' ? 'rgba(220,53,69,0.2)' : 'rgba(255,193,7,0.15)';
           return `<div style="background:rgba(255,193,7,0.03);border:1px solid ${borderColor};border-radius:10px;padding:14px;margin-bottom:10px;">
-            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">${statusBadge}<span style="font-size:11px;color:#4a6a8a;">${fmtDate(s.created_at)}</span></div>
-            <p style="font-size:14px;color:#e0eaff;line-height:1.5;">💡 ${escapeHtml(s.suggestion)}</p>
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;flex-wrap:wrap;gap:6px;">${statusBadge}<span style="font-size:11px;color:#4a6a8a;">${fmtDate(s.created_at)}</span></div>
+            <p id="stext_${s.id}" style="font-size:14px;color:#e0eaff;line-height:1.5;">💡 ${escapeHtml(s.suggestion)}</p>
+            ${isDraft ? `<div style="margin-top:10px;padding:10px;background:rgba(77,166,255,0.06);border-radius:8px;">
+              <p style="font-size:11px;color:#4da6ff;margin-bottom:8px;" data-en="⏰ You have 1 hour to edit, delete, or confirm. HR cannot see this yet." data-ar="⏰ لديك ساعة واحدة للتعديل أو الحذف أو التأكيد. الموارد البشرية لا تراه بعد.">⏰ You have 1 hour to edit, delete, or confirm. HR cannot see this yet.</p>
+              <div style="display:flex;gap:8px;flex-wrap:wrap;">
+                <button onclick="editSuggestion('${s.id}')" style="padding:5px 14px;background:rgba(77,166,255,0.1);border:1px solid rgba(77,166,255,0.3);border-radius:6px;color:#4da6ff;cursor:pointer;font-size:12px;font-weight:600;font-family:inherit;">✏️ Edit</button>
+                <button onclick="deleteSuggestion('${s.id}')" style="padding:5px 14px;background:rgba(220,53,69,0.1);border:1px solid rgba(220,53,69,0.3);border-radius:6px;color:#ff6b7a;cursor:pointer;font-size:12px;font-weight:600;font-family:inherit;">🗑️ Delete</button>
+                <button onclick="confirmSuggestion('${s.id}')" style="padding:5px 14px;background:rgba(40,167,69,0.15);border:1px solid rgba(40,167,69,0.4);border-radius:6px;color:#4ade80;cursor:pointer;font-size:12px;font-weight:700;font-family:inherit;">✅ Confirm & Send to HR</button>
+              </div>
+              <div id="editBox_${s.id}" style="display:none;margin-top:10px;">
+                <textarea id="editText_${s.id}" style="width:100%;padding:10px;font-size:13px;color:#fff;background:#0f2035;border:1.5px solid rgba(77,166,255,0.2);border-radius:8px;font-family:inherit;min-height:70px;box-sizing:border-box;">${escapeHtml(s.suggestion)}</textarea>
+                <div style="display:flex;gap:8px;margin-top:8px;">
+                  <button onclick="saveEdit('${s.id}')" class="btn" style="padding:6px 16px;font-size:12px;">Save</button>
+                  <button onclick="document.getElementById('editBox_${s.id}').style.display='none';" style="padding:6px 16px;background:#4a6a8a;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:12px;font-family:inherit;">Cancel</button>
+                </div>
+              </div>
+            </div>` : ''}
             ${s.hr_comment ? `<div style="margin-top:10px;padding:10px;background:rgba(77,166,255,0.06);border-radius:8px;border-left:3px solid ${s.status==='accepted'?'#4ade80':'#ff6b7a'};"><p style="font-size:12px;color:#a0b4cc;margin-bottom:4px;font-weight:600;" data-en="HR Response:" data-ar="رد الموارد البشرية:">HR Response:</p><p style="font-size:13px;color:#e0eaff;">${escapeHtml(s.hr_comment)}</p></div>` : ''}
           </div>`;
         }).join('')}
@@ -1002,9 +1034,44 @@ app.get('/suggestions', requireAuth, (req, res) => {
     if(!text){wfdAlert('Please write your suggestion.','error');return;}
     if(text.length<10){wfdAlert('Please write at least 10 characters.','error');return;}
     try{var r=await fetch('/api/suggestion',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({suggestion:text})});var d=await r.json();
-      if(d.success){wfdAlert('Thank you! Your anonymous suggestion has been submitted.','success',function(){location.reload();});}
+      if(d.success){wfdAlert('Suggestion saved as draft! You have 1 hour to edit or delete it. Click "Confirm" to send it to HR.','success',function(){location.reload();});}
       else{wfdAlert(d.message,'error');}}
     catch(e){wfdAlert('Network error.','error');}
+  }
+  function editSuggestion(id){document.getElementById('editBox_'+id).style.display='block';}
+  async function saveEdit(id){
+    var text=document.getElementById('editText_'+id).value.trim();
+    if(!text||text.length<10){wfdAlert('Suggestion must be at least 10 characters.','error');return;}
+    try{var r=await fetch('/api/suggestion/edit',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:id,suggestion:text})});var d=await r.json();
+      if(d.success){wfdAlert('Suggestion updated!','success',function(){location.reload();});}
+      else{wfdAlert(d.message,'error');}}
+    catch(e){wfdAlert('Network error.','error');}
+  }
+  async function deleteSuggestion(id){
+    var ov=document.createElement('div');ov.style.cssText='position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.5);z-index:99998;';
+    var t=document.createElement('div');t.style.cssText='position:fixed;top:20px;left:50%;transform:translateX(-50%);z-index:99999;background:#132a45;border:1px solid #ffc107;border-radius:12px;padding:14px 24px;display:flex;flex-direction:column;align-items:center;gap:12px;box-shadow:0 8px 30px rgba(0,0,0,0.4);max-width:500px;width:90%;animation:wfdSlideDown .3s;';
+    t.innerHTML='<span style="font-size:28px;">⚠️</span><p style="font-size:14px;color:#fff;text-align:center;">Delete this suggestion permanently?</p><div style="display:flex;gap:10px;"><button id="cfmYes" style="padding:8px 20px;background:#dc3545;color:#fff;border:none;border-radius:6px;font-size:13px;font-weight:600;cursor:pointer;font-family:inherit;">Yes, Delete</button><button id="cfmNo" style="padding:8px 20px;background:#4a6a8a;color:#fff;border:none;border-radius:6px;font-size:13px;font-weight:600;cursor:pointer;font-family:inherit;">Cancel</button></div>';
+    document.body.appendChild(ov);document.body.appendChild(t);
+    t.querySelector('#cfmNo').onclick=function(){ov.remove();t.remove();};
+    t.querySelector('#cfmYes').onclick=async function(){ov.remove();t.remove();
+      try{var r=await fetch('/api/suggestion/delete/'+id,{method:'DELETE'});var d=await r.json();
+        if(d.success){wfdAlert('Suggestion deleted.','success',function(){location.reload();});}
+        else{wfdAlert(d.message,'error');}}
+      catch(e){wfdAlert('Network error.','error');}
+    };
+  }
+  async function confirmSuggestion(id){
+    var ov=document.createElement('div');ov.style.cssText='position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.5);z-index:99998;';
+    var t=document.createElement('div');t.style.cssText='position:fixed;top:20px;left:50%;transform:translateX(-50%);z-index:99999;background:#132a45;border:1px solid #4ade80;border-radius:12px;padding:14px 24px;display:flex;flex-direction:column;align-items:center;gap:12px;box-shadow:0 8px 30px rgba(0,0,0,0.4);max-width:500px;width:90%;animation:wfdSlideDown .3s;';
+    t.innerHTML='<span style="font-size:28px;">✅</span><p style="font-size:14px;color:#fff;text-align:center;"><strong>Confirm this suggestion?</strong></p><p style="font-size:12px;color:#ffc107;text-align:center;">⚠️ After confirming, you cannot edit or delete this suggestion.</p><div style="display:flex;gap:10px;"><button id="cfmYes" style="padding:8px 20px;background:#28a745;color:#fff;border:none;border-radius:6px;font-size:13px;font-weight:600;cursor:pointer;font-family:inherit;">Yes, Send to HR</button><button id="cfmNo" style="padding:8px 20px;background:#4a6a8a;color:#fff;border:none;border-radius:6px;font-size:13px;font-weight:600;cursor:pointer;font-family:inherit;">Cancel</button></div>';
+    document.body.appendChild(ov);document.body.appendChild(t);
+    t.querySelector('#cfmNo').onclick=function(){ov.remove();t.remove();};
+    t.querySelector('#cfmYes').onclick=async function(){ov.remove();t.remove();
+      try{var r=await fetch('/api/suggestion/confirm',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:id})});var d=await r.json();
+        if(d.success){wfdAlert('Suggestion confirmed and sent to HR!','success',function(){location.reload();});}
+        else{wfdAlert(d.message,'error');}}
+      catch(e){wfdAlert('Network error.','error');}
+    };
   }
   </script></body></html>`);
 });
@@ -1018,11 +1085,59 @@ app.post('/api/suggestion', requireAuth, async (req, res) => {
     const id = uuidv4();
     const createdAt = new Date().toISOString();
     // Store ONLY department — no user ID to keep it truly anonymous
-    db.prepare('INSERT INTO fb_suggestions (id,department,suggestion,created_at) VALUES (?,?,?,?)').run(id, dbUser.department, suggestion.trim(), createdAt);
-    cloudInsert('fb_suggestions', {id, department:dbUser.department, suggestion:suggestion.trim(), created_at:createdAt});
-    res.json({success:true});
-    console.log('[SUGGESTION] Anonymous suggestion from', dbUser.department);
+    // Status starts as 'draft' — employee has 1 hour to edit/delete before HR sees it
+    db.prepare('INSERT INTO fb_suggestions (id,department,suggestion,status,created_at) VALUES (?,?,?,?,?)').run(id, dbUser.department, suggestion.trim(), 'draft', createdAt);
+    cloudInsert('fb_suggestions', {id, department:dbUser.department, suggestion:suggestion.trim(), status:'draft', created_at:createdAt});
+    res.json({success:true, id});
+    console.log('[SUGGESTION] Draft suggestion from', dbUser.department);
   } catch(e) { console.error('[ERROR] Suggestion:', e); res.status(500).json({success:false,message:'Server error.'}); }
+});
+
+// Edit suggestion (draft only, within 1 hour)
+app.post('/api/suggestion/edit', requireAuth, async (req, res) => {
+  try {
+    const { id, suggestion } = req.body;
+    if (!id || !suggestion || suggestion.trim().length < 10) return res.status(400).json({success:false,message:'Suggestion must be at least 10 characters.'});
+    const existing = db.prepare('SELECT * FROM fb_suggestions WHERE id=?').get(id);
+    if (!existing) return res.status(404).json({success:false,message:'Suggestion not found.'});
+    if (existing.status !== 'draft') return res.status(400).json({success:false,message:'This suggestion is already confirmed and cannot be edited.'});
+    const ca = existing.created_at || '';
+    const submittedAt = new Date(ca.includes('Z') || ca.includes('+') ? ca : ca + 'Z');
+    const hoursSince = (Date.now() - submittedAt.getTime()) / (1000*60*60);
+    if (hoursSince > 1) return res.status(400).json({success:false,message:'The 1-hour edit window has passed.'});
+    db.prepare('UPDATE fb_suggestions SET suggestion=? WHERE id=?').run(suggestion.trim(), id);
+    cloudUpdate('fb_suggestions', id, {suggestion: suggestion.trim()});
+    res.json({success:true});
+  } catch(e) { console.error('[ERROR] Edit suggestion:', e); res.status(500).json({success:false,message:'Server error.'}); }
+});
+
+// Delete suggestion (draft only, within 1 hour)
+app.delete('/api/suggestion/delete/:id', requireAuth, async (req, res) => {
+  try {
+    const existing = db.prepare('SELECT * FROM fb_suggestions WHERE id=?').get(req.params.id);
+    if (!existing) return res.status(404).json({success:false,message:'Suggestion not found.'});
+    if (existing.status !== 'draft') return res.status(400).json({success:false,message:'This suggestion is already confirmed and cannot be deleted.'});
+    const ca = existing.created_at || '';
+    const submittedAt = new Date(ca.includes('Z') || ca.includes('+') ? ca : ca + 'Z');
+    const hoursSince = (Date.now() - submittedAt.getTime()) / (1000*60*60);
+    if (hoursSince > 1) return res.status(400).json({success:false,message:'The 1-hour edit window has passed.'});
+    db.prepare('DELETE FROM fb_suggestions WHERE id=?').run(req.params.id);
+    try { await supabase.from('fb_suggestions').delete().eq('id', req.params.id); } catch(e) {}
+    res.json({success:true});
+  } catch(e) { console.error('[ERROR] Delete suggestion:', e); res.status(500).json({success:false,message:'Server error.'}); }
+});
+
+// Confirm suggestion (make it visible to HR)
+app.post('/api/suggestion/confirm', requireAuth, async (req, res) => {
+  try {
+    const { id } = req.body;
+    const existing = db.prepare('SELECT * FROM fb_suggestions WHERE id=?').get(id);
+    if (!existing) return res.status(404).json({success:false,message:'Suggestion not found.'});
+    if (existing.status !== 'draft') return res.status(400).json({success:false,message:'Already confirmed.'});
+    db.prepare("UPDATE fb_suggestions SET status='pending' WHERE id=?").run(id);
+    cloudUpdate('fb_suggestions', id, {status:'pending'});
+    res.json({success:true});
+  } catch(e) { console.error('[ERROR] Confirm suggestion:', e); res.status(500).json({success:false,message:'Server error.'}); }
 });
 
 // ── CHANGE PASSWORD ────────────────────────────────────────
@@ -1583,9 +1698,10 @@ app.get('/admin/dashboard', requireAdmin, (req, res) => {
         <span data-en="Anonymous Suggestions" data-ar="الاقتراحات المجهولة">Anonymous Suggestions</span>
       </h2>
       ${(() => {
+        autoConfirmDrafts(); // Auto-confirm any drafts older than 1 hour
         const allSuggestions = filterDept
-          ? db.prepare('SELECT * FROM fb_suggestions WHERE department=? ORDER BY created_at DESC').all(filterDept)
-          : db.prepare('SELECT * FROM fb_suggestions ORDER BY created_at DESC').all();
+          ? db.prepare("SELECT * FROM fb_suggestions WHERE department=? AND status!='draft' ORDER BY created_at DESC").all(filterDept)
+          : db.prepare("SELECT * FROM fb_suggestions WHERE status!='draft' ORDER BY created_at DESC").all();
         if (allSuggestions.length === 0) return '<p style="text-align:center;color:#a0b4cc;padding:20px;" data-en="No suggestions yet." data-ar="لا توجد اقتراحات بعد.">No suggestions yet.</p>';
         return allSuggestions.slice(0,30).map(s => {
           const statusBadge = s.status==='accepted' ? '<span style="display:inline-block;padding:2px 10px;border-radius:12px;font-size:11px;font-weight:700;background:rgba(40,167,69,0.15);color:#4ade80;">✅ Accepted</span>'
