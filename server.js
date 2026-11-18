@@ -412,8 +412,8 @@ app.get('/dashboard', requireAuth, (req, res) => {
   const ratedIds = personRatingsThisMonth.map(r => r.target_id);
   const unratedTargets = rateTargets.filter(t => !ratedIds.includes(t.id));
 
-  // Check if company rating submitted this month (employees only)
-  const companyRatingThisMonth = !isSuper ? db.prepare('SELECT id,created_at FROM fb_reviews WHERE reviewer_id=? AND target_type=\'company\' AND created_at>=?').get(user.id, monthStart) : null;
+  // Check if company rating submitted this month (both employees AND supervisors)
+  const companyRatingThisMonth = db.prepare('SELECT id,created_at FROM fb_reviews WHERE reviewer_id=? AND target_type=\'company\' AND created_at>=?').get(user.id, monthStart);
 
   // Build rated-persons list with delete eligibility
   const ratedWithInfo = personRatingsThisMonth.filter(r => r.target_id).map(r => {
@@ -560,8 +560,49 @@ app.get('/dashboard', requireAuth, (req, res) => {
       `}
     </div>
     ` : `
-    <!-- ═══════ SUPERVISOR: Rate Employees ═══════ -->
-    <div class="card" style="border-left:4px solid #b08aef;">
+    <!-- ═══════ CARD 1: COMPANY RATING (Supervisors Too) ═══════ -->
+    <div class="card" style="border-left:4px solid #4da6ff;">
+      <h2 class="section-title" style="display:flex;align-items:center;gap:10px;">
+        <span style="font-size:24px;">🏢</span>
+        <span data-en="Company Rating" data-ar="تقييم الشركة">Company Rating</span>
+      </h2>
+      <p style="font-size:13px;color:#a0b4cc;margin-bottom:16px;" data-en="Rate your overall experience at the company. This is NOT about a specific person." data-ar="قيّم تجربتك العامة في الشركة. هذا ليس عن شخص محدد.">Rate your overall experience at the company. This is NOT about a specific person.</p>
+
+      ${companyRatingThisMonth ? `
+        <div style="text-align:center;padding:20px;background:rgba(74,222,128,0.06);border-radius:12px;">
+          <p style="color:#4ade80;font-size:16px;font-weight:600;" data-en="✅ Company rating submitted this month" data-ar="✅ تم إرسال تقييم الشركة هذا الشهر">✅ Company rating submitted this month</p>
+          <p style="color:#a0b4cc;font-size:13px;margin-top:6px;" data-en="You can submit again next month." data-ar="يمكنك الإرسال مرة أخرى الشهر القادم.">You can submit again next month.</p>
+          ${companyCanDelete ? `<button onclick="deleteRating('${companyRatingThisMonth.id}','Company Rating')" style="margin-top:10px;padding:6px 16px;background:rgba(220,53,69,0.1);border:1px solid rgba(220,53,69,0.3);border-radius:8px;color:#ff6b7a;cursor:pointer;font-size:12px;font-weight:600;font-family:inherit;" data-en="🗑️ Delete & Re-submit" data-ar="🗑️ حذف وإعادة إرسال">🗑️ Delete & Re-submit</button>` : ''}
+        </div>
+      ` : `
+        <div class="trust-banner">
+          <p data-en="🔒 Your feedback is 100% anonymous. Be honest — your name will never be shown." data-ar="🔒 تقييمك مجهول تماماً. كن صادقاً — لن يظهر اسمك أبداً.">🔒 Your feedback is 100% anonymous. Be honest — your name will never be shown.</p>
+        </div>
+
+        <div style="display:flex;gap:12px;flex-wrap:wrap;justify-content:center;margin-bottom:16px;padding:10px;background:rgba(77,166,255,0.05);border-radius:8px;">
+          <span style="font-size:11px;color:#dc3545;">★ <span data-en="Bad" data-ar="سيء">Bad</span></span>
+          <span style="font-size:11px;color:#ff6b7a;">★★ <span data-en="Poor" data-ar="ضعيف">Poor</span></span>
+          <span style="font-size:11px;color:#ffc107;">★★★ <span data-en="Good" data-ar="جيد">Good</span></span>
+          <span style="font-size:11px;color:#4da6ff;">★★★★ <span data-en="Very Good" data-ar="جيد جداً">Very Good</span></span>
+          <span style="font-size:11px;color:#4ade80;">★★★★★ <span data-en="Excellent" data-ar="ممتاز">Excellent</span></span>
+        </div>
+
+        ${starsHTML('job_satisfaction','How happy are you with your daily tasks?','ما مدى رضاك عن مهامك اليومية؟')}
+        ${starsHTML('salary_benefits','How fair is your compensation?','ما مدى عدالة تعويضاتك؟')}
+        ${starsHTML('growth_training','Do you have opportunities to develop your skills?','هل لديك فرص لتطوير مهاراتك؟')}
+        ${starsHTML('team_teamwork','Does your team cooperate and work well together?','هل يتعاون فريقك ويعمل بشكل جيد معاً؟')}
+        ${starsHTML('team_respect','Do your colleagues treat each other with respect?','هل يتعامل زملاؤك مع بعضهم باحترام؟')}
+
+        <div class="form-group" style="margin-top:20px;">
+          <label data-en="💬 What would you change to make the company better? (optional)" data-ar="💬 ما الذي تغيره لتحسين الشركة؟ (اختياري)">💬 What would you change to make the company better? (optional)</label>
+          <textarea id="company_comment" placeholder="Your suggestions..."></textarea>
+        </div>
+        <button class="btn btn-full" onclick="submitCompanyFeedback()" data-en="Submit Company Rating" data-ar="إرسال تقييم الشركة">Submit Company Rating</button>
+      `}
+    </div>
+
+    <!-- ═══════ CARD 2: Rate Employees (Supervisor) ═══════ -->
+    <div class="card" style="margin-top:20px;border-left:4px solid #b08aef;">
       <h2 class="section-title" style="display:flex;align-items:center;gap:10px;">
         <span style="font-size:24px;">👥</span>
         <span data-en="Rate Your Team Members" data-ar="قيّم أعضاء فريقك">Rate Your Team Members</span>
@@ -955,8 +996,8 @@ app.post('/api/company-feedback', requireAuth, async (req, res) => {
     const id = uuidv4();
     const createdAt = new Date().toISOString();
     db.prepare('INSERT INTO fb_reviews (id,reviewer_id,reviewer_role,target_type,target_id,department,job_satisfaction,salary_benefits,growth_training,team_teamwork,team_respect,comment,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)')
-      .run(id, user.id, 'employee', 'company', null, dbUser.department, job_satisfaction, salary_benefits, growth_training, team_teamwork, team_respect, comment||null, createdAt);
-    cloudInsert('fb_reviews', {id, reviewer_id:user.id, reviewer_role:'employee', target_type:'company', target_id:null, department:dbUser.department, job_satisfaction, salary_benefits, growth_training, team_teamwork, team_respect, comment:comment||null, created_at:createdAt});
+      .run(id, user.id, dbUser.role, 'company', null, dbUser.department, job_satisfaction, salary_benefits, growth_training, team_teamwork, team_respect, comment||null, createdAt);
+    cloudInsert('fb_reviews', {id, reviewer_id:user.id, reviewer_role:dbUser.role, target_type:'company', target_id:null, department:dbUser.department, job_satisfaction, salary_benefits, growth_training, team_teamwork, team_respect, comment:comment||null, created_at:createdAt});
     res.json({success:true});
     console.log('[FEEDBACK] Company rating saved from', dbUser.department);
   } catch(e) { console.error('[ERROR] Company Feedback:', e); res.status(500).json({success:false,message:'Server error.'}); }
