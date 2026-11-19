@@ -393,6 +393,7 @@ function headerHTML(user) {
     <div class="header-nav">
       <a href="/dashboard" data-en="📊 Dashboard" data-ar="📊 لوحة التحكم">📊 Dashboard</a>
       <a href="/suggestions" data-en="💡 Suggestions" data-ar="💡 اقتراحات">💡 Suggestions</a>
+      <a href="/company-summary" data-en="🏢 Summary" data-ar="🏢 ملخص">🏢 Summary</a>
       <a href="/profile" data-en="👤 Profile" data-ar="👤 الملف">👤 Profile</a>
       ${langToggleBtn()} ${darkToggleBtn()}
       <a href="/logout" style="border-color:rgba(220,53,69,0.3);color:#ff6b7a;" data-en="Logout" data-ar="خروج">Logout</a>
@@ -1010,6 +1011,149 @@ app.get('/profile', requireAuth, (req, res) => {
         </div>
       </div>
       <a href="/change-password" class="btn" style="margin-top:20px;display:inline-block;text-decoration:none;" data-en="🔑 Change Password" data-ar="🔑 تغيير كلمة المرور">🔑 Change Password</a>
+    </div>
+  </div>
+  ${footerHTML()}
+  </body></html>`);
+});
+
+// ── COMPANY SUMMARY (read-only for all users) ──────────────
+app.get('/company-summary', requireAuth, (req, res) => {
+  const user = req.session.user;
+  const now = new Date();
+  const thisMonthStart = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-01`;
+  const lastMonthDate = new Date(now.getFullYear(), now.getMonth()-1, 1);
+  const lastMonthStart = `${lastMonthDate.getFullYear()}-${String(lastMonthDate.getMonth()+1).padStart(2,'0')}-01`;
+  const monthName = now.toLocaleString('en-US', {month:'long', year:'numeric'});
+
+  // All company ratings
+  const allCompanyReviews = db.prepare("SELECT * FROM fb_reviews WHERE target_type='company'").all();
+  const thisMonthCompany = allCompanyReviews.filter(r => r.created_at >= thisMonthStart);
+  const lastMonthCompany = allCompanyReviews.filter(r => r.created_at >= lastMonthStart && r.created_at < thisMonthStart);
+
+  const companyFields = [
+    {key:'job_satisfaction', en:'Job Satisfaction', ar:'الرضا الوظيفي', icon:'💼'},
+    {key:'salary_benefits', en:'Salary & Benefits', ar:'الراتب والمزايا', icon:'💰'},
+    {key:'growth_training', en:'Growth & Training', ar:'النمو والتدريب', icon:'📚'},
+    {key:'team_teamwork', en:'Teamwork', ar:'العمل الجماعي', icon:'🤝'},
+    {key:'team_respect', en:'Respect', ar:'الاحترام', icon:'🤲'}
+  ];
+
+  function avg(arr, field) {
+    const valid = arr.filter(r => r[field]);
+    return valid.length ? (valid.reduce((s,r) => s+r[field], 0) / valid.length) : 0;
+  }
+
+  // Overall company health score
+  const healthScore = allCompanyReviews.length ? (companyFields.reduce((s,f) => s + avg(allCompanyReviews, f.key), 0) / companyFields.length).toFixed(1) : null;
+  const thisMonthHealth = thisMonthCompany.length ? (companyFields.reduce((s,f) => s + avg(thisMonthCompany, f.key), 0) / companyFields.length).toFixed(1) : null;
+  const lastMonthHealth = lastMonthCompany.length ? (companyFields.reduce((s,f) => s + avg(lastMonthCompany, f.key), 0) / companyFields.length).toFixed(1) : null;
+  const trendDiff = (thisMonthHealth && lastMonthHealth) ? (parseFloat(thisMonthHealth) - parseFloat(lastMonthHealth)).toFixed(1) : null;
+
+  // Response rate
+  const allEmps = db.prepare('SELECT * FROM fb_users WHERE is_admin=0').all();
+  const thisMonthReviewers = new Set(db.prepare('SELECT DISTINCT reviewer_id FROM fb_reviews WHERE created_at>=?').all(thisMonthStart).map(r => r.reviewer_id));
+  const responseRate = allEmps.length ? Math.round(thisMonthReviewers.size / allEmps.length * 100) : 0;
+
+  // Employee of the Month
+  const eotm = getEmployeeOfTheMonth();
+
+  // Accepted suggestions (last 5)
+  autoConfirmDrafts();
+  const acceptedSuggestions = db.prepare("SELECT * FROM fb_suggestions WHERE status='accepted' ORDER BY responded_at DESC LIMIT 5").all();
+
+  // Health score color
+  const hsNum = parseFloat(healthScore);
+  const hsColor = isNaN(hsNum) ? '#4a6a8a' : hsNum >= 4 ? '#4ade80' : hsNum >= 3 ? '#ffc107' : '#ff6b7a';
+  const hsEmoji = isNaN(hsNum) ? '—' : hsNum >= 4.5 ? '🟢' : hsNum >= 3.5 ? '🟡' : hsNum >= 2.5 ? '🟠' : '🔴';
+
+  res.send(`${pageHead('Company Summary')}
+  <body>
+  ${headerHTML(user)}
+  <div class="container" style="max-width:800px;">
+    <h1 class="page-title" data-en="🏢 Company Summary" data-ar="🏢 ملخص الشركة">🏢 Company Summary</h1>
+    <p style="text-align:center;color:#a0b4cc;font-size:13px;margin-top:-16px;margin-bottom:24px;" data-en="See how the company is doing — updated in real time" data-ar="شاهد أداء الشركة — محدث في الوقت الحقيقي">See how the company is doing — updated in real time</p>
+
+    <!-- Company Health Score -->
+    <div style="background:linear-gradient(135deg,rgba(77,166,255,0.08),rgba(77,166,255,0.02));border:1px solid rgba(77,166,255,0.2);border-radius:16px;padding:30px;text-align:center;margin-bottom:24px;">
+      <p style="font-size:12px;color:#a0b4cc;text-transform:uppercase;letter-spacing:2px;font-weight:700;" data-en="Company Health Score" data-ar="مؤشر صحة الشركة">Company Health Score</p>
+      ${healthScore ? `
+        <p style="font-size:64px;font-weight:800;color:${hsColor};margin:10px 0;">${healthScore}<span style="font-size:24px;color:#a0b4cc;">/5</span></p>
+        <p style="font-size:20px;">${hsEmoji} ${hsNum >= 4.5 ? 'Excellent!' : hsNum >= 3.5 ? 'Good' : hsNum >= 2.5 ? 'Needs Improvement' : 'Critical'}</p>
+        ${trendDiff ? `<p style="font-size:14px;margin-top:8px;color:${parseFloat(trendDiff)>0?'#4ade80':parseFloat(trendDiff)<0?'#ff6b7a':'#a0b4cc'};">${parseFloat(trendDiff)>0?'↑ +'+trendDiff:parseFloat(trendDiff)<0?'↓ '+trendDiff:'→ No change'} <span style="color:#a0b4cc;" data-en="vs last month" data-ar="مقارنة بالشهر الماضي">vs last month</span></p>` : ''}
+        <p style="font-size:11px;color:#4a6a8a;margin-top:8px;">${allCompanyReviews.length} total ratings</p>
+      ` : '<p style="font-size:18px;color:#4a6a8a;padding:20px;" data-en="No ratings yet this month. Be the first!" data-ar="لا توجد تقييمات بعد. كن الأول!">No ratings yet this month. Be the first!</p>'}
+    </div>
+
+    <!-- Category Breakdown -->
+    ${allCompanyReviews.length > 0 ? `<div class="card" style="border-left:4px solid #4da6ff;">
+      <h2 class="section-title" style="display:flex;align-items:center;gap:10px;">
+        <span style="font-size:22px;">📊</span>
+        <span data-en="Rating Breakdown" data-ar="تفصيل التقييمات">Rating Breakdown</span>
+      </h2>
+      <div style="display:flex;flex-direction:column;gap:14px;">
+        ${companyFields.map(f => {
+          const val = avg(allCompanyReviews, f.key).toFixed(1);
+          const pct = Math.round(parseFloat(val)*20);
+          const thisVal = thisMonthCompany.length ? avg(thisMonthCompany, f.key).toFixed(1) : null;
+          const lastVal = lastMonthCompany.length ? avg(lastMonthCompany, f.key).toFixed(1) : null;
+          const diff = (thisVal && lastVal) ? (parseFloat(thisVal)-parseFloat(lastVal)).toFixed(1) : null;
+          return `<div>
+            <div style="display:flex;justify-content:space-between;margin-bottom:4px;align-items:center;">
+              <span style="font-size:14px;color:#a0b4cc;">${f.icon} <span data-en="${f.en}" data-ar="${f.ar}">${f.en}</span></span>
+              <span style="font-size:14px;font-weight:700;color:#ffc107;">${val}/5 ★ ${diff ? `<span style="font-size:11px;color:${parseFloat(diff)>0?'#4ade80':parseFloat(diff)<0?'#ff6b7a':'#a0b4cc'};">${parseFloat(diff)>0?'↑+'+diff:parseFloat(diff)<0?'↓'+diff:'→'}</span>` : ''}</span>
+            </div>
+            <div style="height:10px;background:#0f2035;border-radius:5px;overflow:hidden;"><div style="height:100%;width:${pct}%;background:linear-gradient(90deg,${pct<40?'#dc3545':pct<70?'#ffc107':'#4ade80'},${pct<40?'#ff6b7a':pct<70?'#ffd43b':'#28a745'});border-radius:5px;transition:width .5s;"></div></div>
+          </div>`;
+        }).join('')}
+      </div>
+    </div>` : ''}
+
+    <!-- Quick Stats Row -->
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin:20px 0;">
+      <div style="background:#132a45;border:1px solid rgba(77,166,255,0.2);border-radius:12px;padding:16px;text-align:center;">
+        <p style="font-size:32px;font-weight:800;color:${responseRate>=70?'#4ade80':responseRate>=40?'#ffc107':'#ff6b7a'};">${responseRate}%</p>
+        <p style="font-size:11px;color:#a0b4cc;" data-en="Response Rate" data-ar="معدل الاستجابة">Response Rate</p>
+      </div>
+      <div style="background:#132a45;border:1px solid rgba(77,166,255,0.2);border-radius:12px;padding:16px;text-align:center;">
+        <p style="font-size:32px;font-weight:800;color:#4da6ff;">${allEmps.length}</p>
+        <p style="font-size:11px;color:#a0b4cc;" data-en="Total Staff" data-ar="إجمالي الموظفين">Total Staff</p>
+      </div>
+      <div style="background:#132a45;border:1px solid rgba(77,166,255,0.2);border-radius:12px;padding:16px;text-align:center;">
+        <p style="font-size:32px;font-weight:800;color:#ffc107;">${thisMonthCompany.length}</p>
+        <p style="font-size:11px;color:#a0b4cc;" data-en="Ratings This Month" data-ar="تقييمات هذا الشهر">Ratings This Month</p>
+      </div>
+    </div>
+
+    <!-- Employee of the Month -->
+    ${eotm ? `<div style="background:linear-gradient(135deg,rgba(255,193,7,0.12),rgba(255,215,0,0.06));border:1px solid rgba(255,193,7,0.3);border-radius:16px;padding:20px;margin-bottom:20px;text-align:center;position:relative;overflow:hidden;">
+      <div style="position:absolute;top:-10px;right:-10px;font-size:60px;opacity:0.1;">🏆</div>
+      <p style="font-size:11px;color:#ffc107;font-weight:700;text-transform:uppercase;letter-spacing:2px;margin-bottom:8px;" data-en="⭐ Employee of the Month — ${escapeHtml(eotm.month)}" data-ar="⭐ موظف الشهر — ${escapeHtml(eotm.month)}">⭐ Employee of the Month — ${escapeHtml(eotm.month)}</p>
+      <div style="width:60px;height:60px;border-radius:50%;background:linear-gradient(135deg,#ffc107,#e6a800);display:flex;align-items:center;justify-content:center;margin:0 auto 10px;font-size:28px;color:#fff;font-weight:700;box-shadow:0 4px 15px rgba(255,193,7,0.4);">${escapeHtml(eotm.name.charAt(0).toUpperCase())}</div>
+      <h3 style="font-size:20px;font-weight:800;color:#ffc107;">${escapeHtml(eotm.name)}</h3>
+      <p style="font-size:13px;color:#a0b4cc;margin-top:4px;">${escapeHtml(eotm.department)} · <span style="color:#ffc107;font-weight:700;">${eotm.avg}/5 ★</span></p>
+    </div>` : ''}
+
+    <!-- Accepted Suggestions -->
+    ${acceptedSuggestions.length > 0 ? `<div class="card" style="border-left:4px solid #4ade80;">
+      <h2 class="section-title" style="display:flex;align-items:center;gap:10px;">
+        <span style="font-size:22px;">💡</span>
+        <span data-en="Recently Accepted Suggestions" data-ar="الاقتراحات المقبولة مؤخراً">Recently Accepted Suggestions</span>
+      </h2>
+      <p style="font-size:12px;color:#a0b4cc;margin-bottom:16px;" data-en="Ideas from employees that the company is implementing" data-ar="أفكار من الموظفين تقوم الشركة بتنفيذها">Ideas from employees that the company is implementing</p>
+      ${acceptedSuggestions.map(s => `<div style="background:rgba(74,222,128,0.04);border:1px solid rgba(74,222,128,0.2);border-radius:10px;padding:14px;margin-bottom:10px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+          <span style="display:inline-block;padding:2px 10px;border-radius:12px;font-size:11px;font-weight:700;background:rgba(40,167,69,0.15);color:#4ade80;">✅ Accepted</span>
+          <span style="font-size:11px;color:#4a6a8a;">${escapeHtml(s.department)} · ${fmtDate(s.responded_at||s.created_at)}</span>
+        </div>
+        <p style="font-size:14px;color:#e0eaff;line-height:1.5;">💡 ${escapeHtml(s.suggestion)}</p>
+        ${s.hr_comment ? `<div style="margin-top:8px;padding:10px;background:rgba(74,222,128,0.06);border-radius:8px;border-left:3px solid #4ade80;"><p style="font-size:12px;color:#4ade80;font-weight:600;margin-bottom:2px;">HR:</p><p style="font-size:13px;color:#e0eaff;">${escapeHtml(s.hr_comment)}</p></div>` : ''}
+      </div>`).join('')}
+    </div>` : ''}
+
+    <!-- Motivational Footer -->
+    <div style="text-align:center;padding:20px;margin-top:10px;">
+      <p style="font-size:14px;color:#4da6ff;font-weight:600;" data-en="💪 Your feedback shapes this company. Keep rating!" data-ar="💪 تقييمك يشكّل هذه الشركة. استمر بالتقييم!">💪 Your feedback shapes this company. Keep rating!</p>
     </div>
   </div>
   ${footerHTML()}
