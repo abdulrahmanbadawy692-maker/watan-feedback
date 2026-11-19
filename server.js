@@ -185,6 +185,36 @@ function eyeBtn(inputId) {
 }
 function fmtDate(d) { try { const dt = new Date(d && (d.includes('Z')||d.includes('+')) ? d : (d||'')+'Z'); return isNaN(dt.getTime()) ? (d||'').slice(0,10)||'—' : dt.toLocaleDateString('en-US',{year:'numeric',month:'short'}); } catch(e) { return '—'; } }
 
+// Employee of the Month calculator
+function getEmployeeOfTheMonth() {
+  const now = new Date();
+  const monthStart = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-01`;
+  const monthName = now.toLocaleString('en-US', {month:'long', year:'numeric'});
+  // Get all supervisor→employee ratings this month
+  const supRatings = db.prepare("SELECT * FROM fb_reviews WHERE reviewer_role='supervisor' AND target_type='employee' AND target_id IS NOT NULL AND created_at>=?").all(monthStart);
+  if (supRatings.length === 0) return null;
+  // Calculate average per employee
+  const empScores = {};
+  for (const r of supRatings) {
+    if (!empScores[r.target_id]) empScores[r.target_id] = {scores:[], total:0, count:0};
+    const avg = ((r.emp_performance||0)+(r.emp_punctuality||0)+(r.emp_attitude||0)+(r.emp_initiative||0))/4;
+    empScores[r.target_id].scores.push(avg);
+    empScores[r.target_id].total += avg;
+    empScores[r.target_id].count++;
+  }
+  // Find the top scorer
+  let topId = null, topAvg = 0;
+  for (const [id, data] of Object.entries(empScores)) {
+    const avg = data.total / data.count;
+    if (avg > topAvg) { topAvg = avg; topId = id; }
+  }
+  if (!topId) return null;
+  const emp = getUserById.get(topId);
+  if (!emp) return null;
+  const topData = empScores[topId];
+  return { id: topId, name: emp.full_name, department: emp.department, avg: topAvg.toFixed(1), ratings: topData.count, month: monthName };
+}
+
 // ── Shared HTML Helpers ─────────────────────────────────────
 function langToggleScript() {
   return `<script>
@@ -549,6 +579,9 @@ app.get('/dashboard', requireAuth, (req, res) => {
   // Get user's own past submissions
   const mySubmissions = db.prepare('SELECT * FROM fb_reviews WHERE reviewer_id=? ORDER BY created_at DESC').all(user.id);
 
+  // Employee of the Month
+  const eotm = getEmployeeOfTheMonth();
+
   res.send(`${pageHead('Dashboard')}
   <body>
   ${headerHTML(user)}
@@ -569,6 +602,16 @@ app.get('/dashboard', requireAuth, (req, res) => {
         <p style="font-size:18px;font-weight:700;color:${allRatedThisMonth.length>0?'#4ade80':'#ffc107'};">${allRatedThisMonth.length>0?'Submitted ✅':'Not yet'}</p>
       </div>
     </div>
+
+    <!-- Employee of the Month -->
+    ${eotm ? `<div style="background:linear-gradient(135deg,rgba(255,193,7,0.12),rgba(255,215,0,0.06));border:1px solid rgba(255,193,7,0.3);border-radius:16px;padding:20px;margin-bottom:24px;text-align:center;position:relative;overflow:hidden;">
+      <div style="position:absolute;top:-10px;right:-10px;font-size:60px;opacity:0.1;">🏆</div>
+      <p style="font-size:12px;color:#ffc107;font-weight:700;text-transform:uppercase;letter-spacing:2px;margin-bottom:8px;" data-en="⭐ Employee of the Month — ${escapeHtml(eotm.month)}" data-ar="⭐ موظف الشهر — ${escapeHtml(eotm.month)}">⭐ Employee of the Month — ${escapeHtml(eotm.month)}</p>
+      <div style="width:60px;height:60px;border-radius:50%;background:linear-gradient(135deg,#ffc107,#e6a800);display:flex;align-items:center;justify-content:center;margin:0 auto 10px;font-size:28px;color:#fff;font-weight:700;box-shadow:0 4px 15px rgba(255,193,7,0.4);">${escapeHtml(eotm.name.charAt(0).toUpperCase())}</div>
+      <h3 style="font-size:20px;font-weight:800;color:#ffc107;">${escapeHtml(eotm.name)}</h3>
+      <p style="font-size:13px;color:#a0b4cc;margin-top:4px;">${escapeHtml(eotm.department)} · <span style="color:#ffc107;font-weight:700;">${eotm.avg}/5 ★</span> · ${eotm.ratings} rating(s)</p>
+      ${eotm.id === user.id ? '<p style="font-size:14px;color:#4ade80;font-weight:700;margin-top:8px;" data-en="🎉 Congratulations! That\'s YOU!" data-ar="🎉 مبروك! هذا أنت!">🎉 Congratulations! That\'s YOU!</p>' : ''}
+    </div>` : ''}
 
     <!-- Dashboard Tabs -->
     <div style="display:flex;gap:0;margin-bottom:24px;border-bottom:2px solid rgba(77,166,255,0.2);">
@@ -1546,6 +1589,25 @@ app.get('/admin/dashboard', requireAdmin, (req, res) => {
     return `<span style="color:#a0b4cc;font-size:12px;">→ 0</span>`;
   }
 
+  // Employee of the Month
+  const eotm = getEmployeeOfTheMonth();
+
+  // Top 3 employees this month (for HR)
+  const top3 = (() => {
+    const supRatingsMonth = db.prepare("SELECT * FROM fb_reviews WHERE reviewer_role='supervisor' AND target_type='employee' AND target_id IS NOT NULL AND created_at>=?").all(thisMonthStart);
+    if (supRatingsMonth.length === 0) return [];
+    const scores = {};
+    for (const r of supRatingsMonth) {
+      if (!scores[r.target_id]) scores[r.target_id] = {total:0, count:0};
+      const avg = ((r.emp_performance||0)+(r.emp_punctuality||0)+(r.emp_attitude||0)+(r.emp_initiative||0))/4;
+      scores[r.target_id].total += avg; scores[r.target_id].count++;
+    }
+    return Object.entries(scores).map(([id, data]) => {
+      const emp = getUserById.get(id);
+      return emp ? {name:emp.full_name, department:emp.department, avg:(data.total/data.count).toFixed(1), ratings:data.count} : null;
+    }).filter(Boolean).sort((a,b) => parseFloat(b.avg)-parseFloat(a.avg)).slice(0,3);
+  })();
+
   res.send(`${pageHead('HR Dashboard')}
   <body>
   <header class="header">
@@ -1608,6 +1670,33 @@ app.get('/admin/dashboard', requireAdmin, (req, res) => {
         <p style="font-size:12px;color:#a0b4cc;" data-en="Total Staff" data-ar="إجمالي الموظفين">Total Staff</p>
       </div>
     </div>
+
+    <!-- Employee of the Month -->
+    ${eotm ? `<div style="background:linear-gradient(135deg,rgba(255,193,7,0.12),rgba(255,215,0,0.06));border:2px solid rgba(255,193,7,0.3);border-radius:16px;padding:24px;margin-bottom:24px;position:relative;overflow:hidden;">
+      <div style="position:absolute;top:-15px;right:-15px;font-size:80px;opacity:0.08;">🏆</div>
+      <div style="display:flex;align-items:center;gap:20px;flex-wrap:wrap;">
+        <div style="text-align:center;flex-shrink:0;">
+          <div style="width:70px;height:70px;border-radius:50%;background:linear-gradient(135deg,#ffc107,#e6a800);display:flex;align-items:center;justify-content:center;font-size:32px;color:#fff;font-weight:700;box-shadow:0 4px 15px rgba(255,193,7,0.4);margin:0 auto;">${escapeHtml(eotm.name.charAt(0).toUpperCase())}</div>
+          <p style="font-size:28px;margin-top:4px;">🏆</p>
+        </div>
+        <div style="flex:1;">
+          <p style="font-size:11px;color:#ffc107;font-weight:700;text-transform:uppercase;letter-spacing:2px;" data-en="Employee of the Month — ${escapeHtml(eotm.month)}" data-ar="موظف الشهر — ${escapeHtml(eotm.month)}">Employee of the Month — ${escapeHtml(eotm.month)}</p>
+          <h3 style="font-size:24px;font-weight:800;color:#ffc107;margin-top:4px;">${escapeHtml(eotm.name)}</h3>
+          <p style="font-size:14px;color:#a0b4cc;margin-top:4px;">${escapeHtml(eotm.department)} · <span style="color:#ffc107;font-weight:700;">${eotm.avg}/5 ★</span> · ${eotm.ratings} supervisor rating(s)</p>
+        </div>
+      </div>
+      ${top3.length >= 2 ? `<div style="margin-top:16px;padding-top:16px;border-top:1px solid rgba(255,193,7,0.2);">
+        <p style="font-size:12px;color:#a0b4cc;margin-bottom:10px;font-weight:600;" data-en="Top Performers This Month:" data-ar="أفضل الأداء هذا الشهر:">Top Performers This Month:</p>
+        <div style="display:flex;gap:12px;flex-wrap:wrap;">
+          ${top3.map((t,i) => `<div style="flex:1;min-width:140px;background:rgba(255,193,7,${i===0?'0.1':'0.04'});border:1px solid rgba(255,193,7,${i===0?'0.3':'0.15'});border-radius:10px;padding:12px;text-align:center;">
+            <span style="font-size:18px;">${i===0?'🥇':i===1?'🥈':'🥉'}</span>
+            <p style="font-size:14px;font-weight:700;color:${i===0?'#ffc107':'#a0b4cc'};margin-top:4px;">${escapeHtml(t.name)}</p>
+            <p style="font-size:11px;color:#4a6a8a;">${escapeHtml(t.department)}</p>
+            <p style="font-size:16px;font-weight:700;color:#ffc107;margin-top:4px;">${t.avg}/5 ★</p>
+          </div>`).join('')}
+        </div>
+      </div>` : ''}
+    </div>` : ''}
 
     <!-- Response Rate Tracker -->
     <div class="card" style="border-left:4px solid #4ade80;">
