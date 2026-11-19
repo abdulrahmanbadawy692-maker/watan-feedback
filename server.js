@@ -235,7 +235,7 @@ function accessibilityJS() {
   return `<script>
   function toggleHC(){document.body.classList.toggle('high-contrast');}
   var baseFontSize=100;
-  function changeFontSize(d){baseFontSize=Math.max(80,Math.min(140,baseFontSize+d*10));document.body.style.fontSize=baseFontSize+'%';}
+  function changeFontSize(d){baseFontSize=Math.max(80,Math.min(150,baseFontSize+d*10));document.body.style.zoom=(baseFontSize/100);}
   </script>`;
 }
 
