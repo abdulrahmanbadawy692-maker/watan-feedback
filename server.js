@@ -2083,14 +2083,21 @@ app.get('/admin/dashboard', requireAdmin, (req, res) => {
       catch(e){wfdAlert('Network error.','error');}
     };
   }
-  async function sendReminder(){
-    if(!confirm('Send reminder emails to all employees who have not submitted feedback this month?'))return;
-    try{
-      var r=await fetch('/api/admin/send-reminder',{method:'POST',headers:{'Content-Type':'application/json'}});
-      var d=await r.json();
-      if(d.success){wfdAlert(d.message||'Reminders sent!','success');}
-      else{wfdAlert(d.message||'Error sending reminders.','error');}
-    }catch(e){wfdAlert('Network error.','error');}
+  function sendReminder(){
+    var ov=document.createElement('div');ov.style.cssText='position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.5);z-index:99998;';
+    var t=document.createElement('div');t.style.cssText='position:fixed;top:20px;left:50%;transform:translateX(-50%);z-index:99999;background:#132a45;border:1px solid #ffc107;border-radius:12px;padding:14px 24px;display:flex;flex-direction:column;align-items:center;gap:12px;box-shadow:0 8px 30px rgba(0,0,0,0.4);max-width:500px;width:90%;animation:wfdSlideDown .3s;';
+    t.innerHTML='<span style="font-size:28px;">📧</span><p style="font-size:14px;color:#fff;text-align:center;">Send reminder emails to all employees who have not submitted feedback this month?</p><div style="display:flex;gap:10px;"><button id="cfmY" style="padding:8px 20px;background:#ffc107;color:#000;border:none;border-radius:6px;font-size:13px;font-weight:600;cursor:pointer;font-family:inherit;">Yes, Send</button><button id="cfmN" style="padding:8px 20px;background:#4a6a8a;color:#fff;border:none;border-radius:6px;font-size:13px;font-weight:600;cursor:pointer;font-family:inherit;">Cancel</button></div>';
+    document.body.appendChild(ov);document.body.appendChild(t);
+    t.querySelector('#cfmN').onclick=function(){ov.remove();t.remove();};
+    ov.onclick=function(){ov.remove();t.remove();};
+    t.querySelector('#cfmY').onclick=async function(){ov.remove();t.remove();
+      try{
+        var r=await fetch('/api/admin/send-reminder',{method:'POST',headers:{'Content-Type':'application/json'}});
+        var d=await r.json();
+        if(d.success){wfdAlert(d.message||'Reminders sent!','success');}
+        else{wfdAlert(d.message||'Error sending reminders.','error');}
+      }catch(e){wfdAlert('Network error.','error');}
+    };
   }
   </script>
   </body></html>`);
@@ -2181,49 +2188,93 @@ app.get('/admin/manage', requireAdmin, (req, res) => {
   ${footerHTML()}
   <script>
   function filterUsers(){var q=document.getElementById('userSearch').value.toLowerCase();document.querySelectorAll('.user-row').forEach(function(el){var n=el.getAttribute('data-name')||'';var e=el.getAttribute('data-email')||'';el.style.display=(n.includes(q)||e.includes(q))?'flex':'none';});}
+
+  // ── Custom modal helpers (replaces browser confirm/prompt) ──
+  function wfdConfirm(msg,icon,btnText,btnColor,onYes){
+    var ov=document.createElement('div');ov.style.cssText='position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.5);z-index:99998;';
+    var t=document.createElement('div');t.style.cssText='position:fixed;top:20px;left:50%;transform:translateX(-50%);z-index:99999;background:#132a45;border:1px solid '+(btnColor||'#ffc107')+';border-radius:12px;padding:14px 24px;display:flex;flex-direction:column;align-items:center;gap:12px;box-shadow:0 8px 30px rgba(0,0,0,0.4);max-width:500px;width:90%;animation:wfdSlideDown .3s;';
+    t.innerHTML='<span style="font-size:28px;">'+(icon||'⚠️')+'</span><p style="font-size:14px;color:#fff;text-align:center;">'+msg+'</p><div style="display:flex;gap:10px;"><button id="cfmY" style="padding:8px 20px;background:'+(btnColor||'#ffc107')+';color:#fff;border:none;border-radius:6px;font-size:13px;font-weight:600;cursor:pointer;font-family:inherit;">'+(btnText||'Yes')+'</button><button id="cfmN" style="padding:8px 20px;background:#4a6a8a;color:#fff;border:none;border-radius:6px;font-size:13px;font-weight:600;cursor:pointer;font-family:inherit;">Cancel</button></div>';
+    document.body.appendChild(ov);document.body.appendChild(t);
+    t.querySelector('#cfmN').onclick=function(){ov.remove();t.remove();};
+    ov.onclick=function(){ov.remove();t.remove();};
+    t.querySelector('#cfmY').onclick=function(){ov.remove();t.remove();onYes();};
+  }
+  function wfdPrompt(msg,icon,placeholder,defaultVal,onSubmit){
+    var ov=document.createElement('div');ov.style.cssText='position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.5);z-index:99998;';
+    var t=document.createElement('div');t.style.cssText='position:fixed;top:20px;left:50%;transform:translateX(-50%);z-index:99999;background:#132a45;border:1px solid #4da6ff;border-radius:12px;padding:14px 24px;display:flex;flex-direction:column;align-items:center;gap:12px;box-shadow:0 8px 30px rgba(0,0,0,0.4);max-width:500px;width:90%;animation:wfdSlideDown .3s;';
+    t.innerHTML='<span style="font-size:28px;">'+(icon||'✏️')+'</span><p style="font-size:14px;color:#fff;text-align:center;">'+msg+'</p><input id="cfmInput" type="text" value="'+(defaultVal||'')+'" placeholder="'+(placeholder||'')+'" style="width:100%;padding:10px 12px;font-size:14px;color:#fff;background:#0f2035;border:1.5px solid rgba(77,166,255,0.3);border-radius:8px;font-family:inherit;outline:none;"><div style="display:flex;gap:10px;"><button id="cfmY" style="padding:8px 20px;background:#4da6ff;color:#fff;border:none;border-radius:6px;font-size:13px;font-weight:600;cursor:pointer;font-family:inherit;">OK</button><button id="cfmN" style="padding:8px 20px;background:#4a6a8a;color:#fff;border:none;border-radius:6px;font-size:13px;font-weight:600;cursor:pointer;font-family:inherit;">Cancel</button></div>';
+    document.body.appendChild(ov);document.body.appendChild(t);
+    var inp=t.querySelector('#cfmInput');setTimeout(function(){inp.focus();inp.select();},100);
+    t.querySelector('#cfmN').onclick=function(){ov.remove();t.remove();};
+    ov.onclick=function(){ov.remove();t.remove();};
+    t.querySelector('#cfmY').onclick=function(){var v=inp.value;ov.remove();t.remove();onSubmit(v);};
+    inp.onkeydown=function(e){if(e.key==='Enter'){var v=inp.value;ov.remove();t.remove();onSubmit(v);}};
+  }
+  function wfdSelect(msg,icon,options,currentVal,onSelect){
+    var ov=document.createElement('div');ov.style.cssText='position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.5);z-index:99998;';
+    var t=document.createElement('div');t.style.cssText='position:fixed;top:20px;left:50%;transform:translateX(-50%);z-index:99999;background:#132a45;border:1px solid #4ade80;border-radius:12px;padding:14px 24px;display:flex;flex-direction:column;align-items:center;gap:12px;box-shadow:0 8px 30px rgba(0,0,0,0.4);max-width:500px;width:90%;animation:wfdSlideDown .3s;max-height:80vh;overflow-y:auto;';
+    var btnsHtml=options.map(function(o,i){var isCurrent=o===currentVal;return '<button onclick="this.closest(\\'.wfd-sel\\').dataset.pick=\\''+i+'\\';this.closest(\\'.wfd-sel\\').querySelector(\\'#cfmY\\').click();" style="display:block;width:100%;padding:10px 14px;text-align:left;background:'+(isCurrent?'rgba(74,222,128,0.15)':'rgba(77,166,255,0.06)')+';border:1px solid '+(isCurrent?'rgba(74,222,128,0.4)':'rgba(77,166,255,0.15)')+';border-radius:8px;color:'+(isCurrent?'#4ade80':'#fff')+';font-size:13px;font-weight:'+(isCurrent?'700':'500')+';cursor:pointer;font-family:inherit;margin-bottom:4px;">'+(isCurrent?'✅ ':'')+o+'</button>';}).join('');
+    t.innerHTML='<span style="font-size:28px;">'+(icon||'🏢')+'</span><p style="font-size:14px;color:#fff;text-align:center;">'+msg+'</p><div style="width:100%;">'+btnsHtml+'</div><button id="cfmY" style="display:none;"></button>';
+    t.classList.add('wfd-sel');
+    document.body.appendChild(ov);document.body.appendChild(t);
+    ov.onclick=function(){ov.remove();t.remove();};
+    t.querySelector('#cfmY').onclick=function(){var idx=parseInt(t.dataset.pick);ov.remove();t.remove();if(!isNaN(idx))onSelect(options[idx]);};
+  }
+
   async function addUser(confirmDup){var n=document.getElementById('aName').value.trim(),e=document.getElementById('aEmailAdd').value.trim(),p=document.getElementById('aPassAdd').value,d=document.getElementById('aDept').value,r=document.getElementById('aRole').value;
     if(!n||!e||!p){wfdAlert('All fields required.','error');return;}
     try{var res=await fetch('/api/admin/add-user',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:n,email:e,password:p,department:d,role:r,confirmDuplicate:confirmDup||false})});var data=await res.json();
       if(data.success){wfdAlert('User added!','success',function(){location.reload();});}
-      else if(data.duplicate){if(confirm(data.message+'\\n\\nAdd anyway?')){addUser(true);};}
+      else if(data.duplicate){wfdConfirm(data.message+'<br><br>Add anyway?','⚠️','Yes, Add','#ffc107',function(){addUser(true);});}
       else{wfdAlert(data.message,'error');}}
     catch(x){wfdAlert('Network error.','error');}
   }
-  async function deleteUser(id,name){if(!confirm('Delete user "'+name+'"? This cannot be undone.'))return;
-    try{var r=await fetch('/api/admin/delete-user/'+id,{method:'DELETE'});var d=await r.json();
-      if(d.success){wfdAlert('User deleted.','success',function(){location.reload();});}
-      else{wfdAlert(d.message,'error');}}
-    catch(x){wfdAlert('Network error.','error');}
+  function deleteUser(id,name){
+    wfdConfirm('Delete user <strong>"'+name+'"</strong>?<br>This cannot be undone.','🗑️','Yes, Delete','#dc3545',async function(){
+      try{var r=await fetch('/api/admin/delete-user/'+id,{method:'DELETE'});var d=await r.json();
+        if(d.success){wfdAlert('User deleted.','success',function(){location.reload();});}
+        else{wfdAlert(d.message,'error');}}
+      catch(x){wfdAlert('Network error.','error');}
+    });
   }
-  async function editName(id,currentName,confirmDup){
-    if(!confirmDup){var nn=prompt('Enter new name for "'+currentName+'":',currentName);if(!nn||!nn.trim())return;if(nn.trim()===currentName){wfdAlert('Same name.','error');return;}window._editNameVal=nn.trim();}
+  function editName(id,currentName,confirmDup){
+    if(!confirmDup){
+      wfdPrompt('Enter new name for <strong>"'+currentName+'"</strong>:','✏️','New name...',currentName,function(nn){
+        if(!nn||!nn.trim()){return;}if(nn.trim()===currentName){wfdAlert('Same name.','error');return;}
+        window._editNameVal=nn.trim();editName(id,currentName,'submit');
+      });return;
+    }
     var nameVal=window._editNameVal;
-    try{var r=await fetch('/api/admin/change-name',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({userId:id,newName:nameVal,confirmDuplicate:confirmDup||false})});var d=await r.json();
-      if(d.success){wfdAlert('Name changed!','success',function(){location.reload();});}
-      else if(d.duplicate){if(confirm(d.message+'\\n\\nChange anyway?')){editName(id,currentName,true);};}
-      else{wfdAlert(d.message,'error');}}
-    catch(x){wfdAlert('Network error.','error');}
+    (async function(){
+      try{var r=await fetch('/api/admin/change-name',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({userId:id,newName:nameVal,confirmDuplicate:confirmDup||false})});var d=await r.json();
+        if(d.success){wfdAlert('Name changed!','success',function(){location.reload();});}
+        else if(d.duplicate){wfdConfirm(d.message+'<br><br>Change anyway?','⚠️','Yes, Change','#ffc107',function(){window._editNameVal=nameVal;editName(id,currentName,true);});}
+        else{wfdAlert(d.message,'error');}}
+      catch(x){wfdAlert('Network error.','error');}
+    })();
   }
-  async function editDept(id,name,currentDept){
+  function editDept(id,name,currentDept){
     var depts=${JSON.stringify(departments)};
-    var opts=depts.map(function(d,i){return (i+1)+'. '+d;}).join('\\n');
-    var pick=prompt('Change department for "'+name+'"\\nCurrent: '+currentDept+'\\n\\nType the number:\\n'+opts);
-    if(!pick)return;
-    var idx=parseInt(pick)-1;
-    if(isNaN(idx)||idx<0||idx>=depts.length){wfdAlert('Invalid selection.','error');return;}
-    var newDept=depts[idx];
-    if(newDept===currentDept){wfdAlert('Same department selected.','error');return;}
-    try{var r=await fetch('/api/admin/change-department',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({userId:id,department:newDept})});var d=await r.json();
-      if(d.success){wfdAlert('Department changed to '+newDept+'!','success',function(){location.reload();});}
-      else{wfdAlert(d.message,'error');}}
-    catch(x){wfdAlert('Network error.','error');}
+    wfdSelect('Change department for <strong>"'+name+'"</strong><br><span style="font-size:12px;color:#a0b4cc;">Current: '+currentDept+'</span>','🏢',depts,currentDept,function(newDept){
+      if(newDept===currentDept){wfdAlert('Same department selected.','error');return;}
+      (async function(){
+        try{var r=await fetch('/api/admin/change-department',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({userId:id,department:newDept})});var d=await r.json();
+          if(d.success){wfdAlert('Department changed to '+newDept+'!','success',function(){location.reload();});}
+          else{wfdAlert(d.message,'error');}}
+        catch(x){wfdAlert('Network error.','error');}
+      })();
+    });
   }
-  async function resetPass(id,name){var np=prompt('Enter new password for "'+name+'":');
-    if(!np||np.length<6){if(np!==null)wfdAlert('Password must be at least 6 characters.','error');return;}
-    try{var r=await fetch('/api/admin/reset-password',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({userId:id,newPassword:np})});var d=await r.json();
-      if(d.success){wfdAlert('Password reset! New password: '+np,'success',function(){location.reload();});}
-      else{wfdAlert(d.message,'error');}}
-    catch(x){wfdAlert('Network error.','error');}
+  function resetPass(id,name){
+    wfdPrompt('Enter new password for <strong>"'+name+'"</strong>:','🔑','New password (6+ chars)...','',function(np){
+      if(!np||np.length<6){if(np)wfdAlert('Password must be at least 6 characters.','error');return;}
+      (async function(){
+        try{var r=await fetch('/api/admin/reset-password',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({userId:id,newPassword:np})});var d=await r.json();
+          if(d.success){wfdAlert('Password reset! New password: '+np,'success',function(){location.reload();});}
+          else{wfdAlert(d.message,'error');}}
+        catch(x){wfdAlert('Network error.','error');}
+      })();
+    });
   }
   async function addDept(){var n=document.getElementById('newDept').value.trim();
     if(!n){wfdAlert('Please enter a department name.','error');return;}
@@ -2232,11 +2283,13 @@ app.get('/admin/manage', requireAdmin, (req, res) => {
       else{wfdAlert(d.message,'error');}}
     catch(x){wfdAlert('Network error.','error');}
   }
-  async function removeDept(name){if(!confirm('Remove department "'+name+'"? Existing users in this department will NOT be affected.'))return;
-    try{var r=await fetch('/api/admin/delete-department/'+encodeURIComponent(name),{method:'DELETE'});var d=await r.json();
-      if(d.success){wfdAlert('Department removed.','success',function(){location.reload();});}
-      else{wfdAlert(d.message,'error');}}
-    catch(x){wfdAlert('Network error.','error');}
+  function removeDept(name){
+    wfdConfirm('Remove department <strong>"'+name+'"</strong>?<br><span style="font-size:12px;color:#a0b4cc;">Existing users in this department will NOT be affected.</span>','🏢','Yes, Remove','#dc3545',async function(){
+      try{var r=await fetch('/api/admin/delete-department/'+encodeURIComponent(name),{method:'DELETE'});var d=await r.json();
+        if(d.success){wfdAlert('Department removed.','success',function(){location.reload();});}
+        else{wfdAlert(d.message,'error');}}
+      catch(x){wfdAlert('Network error.','error');}
+    });
   }
   </script></body></html>`);
 });
