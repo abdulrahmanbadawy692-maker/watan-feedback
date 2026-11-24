@@ -163,7 +163,7 @@ const getByDept = db.prepare('SELECT * FROM fb_users WHERE department=? AND is_a
 const app = express();
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
-app.use(session({ secret: SESSION_SECRET, resave: true, saveUninitialized: false, cookie: { maxAge: null } }));
+app.use(session({ secret: SESSION_SECRET, resave: true, saveUninitialized: false, cookie: { maxAge: null, secure: process.env.NODE_ENV==='production', sameSite: 'lax' } }));
 app.use(express.static(path.join(__dirname, 'public')));
 const authLimiter = rateLimit({ windowMs: 15*60*1000, max: 10, message: { success:false, message:'Too many attempts. Try again later.' } });
 
@@ -303,6 +303,8 @@ function lightModeCSS() {
     body.light-mode .star{color:#c0c8d0 !important;}
     body.light-mode .star.active{color:#ffc107 !important;}
     body.light-mode .header-nav a,body.light-mode .header-nav button{background:rgba(77,166,255,0.06) !important;border-color:rgba(77,166,255,0.2) !important;}
+    body.light-mode [style*="color:#ffc107"]{color:#b8860b !important;}
+    body.light-mode [style*="color:#a0b4cc"]{color:#555 !important;}
   `;
 }
 function accessibilityCSS() {
@@ -527,6 +529,7 @@ app.post('/api/forgot-password', authLimiter, async (req, res) => {
 app.get('/dashboard', requireAuth, (req, res) => {
   const user = req.session.user;
   const dbUser = getUserById.get(user.id);
+  if (!dbUser) { req.session.destroy(); return res.redirect('/'); }
   const isSuper = dbUser.role === 'supervisor';
 
   const now = new Date();
@@ -995,6 +998,7 @@ app.get('/dashboard', requireAuth, (req, res) => {
 app.get('/profile', requireAuth, (req, res) => {
   const user = req.session.user;
   const dbUser = getUserById.get(user.id);
+  if (!dbUser) { req.session.destroy(); return res.redirect('/'); }
   const totalRatings = db.prepare('SELECT COUNT(*) as c FROM fb_reviews WHERE reviewer_id=?').get(user.id).c;
   const ratingsAboutMe = db.prepare('SELECT COUNT(*) as c FROM fb_reviews WHERE target_id=?').get(user.id).c;
   res.send(`${pageHead('My Profile')}
@@ -1178,6 +1182,7 @@ app.get('/company-summary', requireAuth, (req, res) => {
 app.get('/suggestions', requireAuth, (req, res) => {
   const user = req.session.user;
   const dbUser = getUserById.get(user.id);
+  if (!dbUser) { req.session.destroy(); return res.redirect('/'); }
   const now = new Date();
   autoConfirmDrafts(); // Auto-confirm any drafts older than 1 hour
   const mySuggestions = db.prepare('SELECT * FROM fb_suggestions WHERE department=? ORDER BY created_at DESC').all(dbUser.department);
@@ -1310,6 +1315,7 @@ app.post('/api/suggestion', requireAuth, async (req, res) => {
   try {
     const user = req.session.user;
     const dbUser = getUserById.get(user.id);
+    if (!dbUser) return res.status(401).json({success:false,message:'Session expired.'});
     const { suggestion } = req.body;
     if (!suggestion || suggestion.trim().length < 10) return res.status(400).json({success:false,message:'Suggestion must be at least 10 characters.'});
     const id = uuidv4();
@@ -1330,6 +1336,8 @@ app.post('/api/suggestion/edit', requireAuth, async (req, res) => {
     if (!id || !suggestion || suggestion.trim().length < 10) return res.status(400).json({success:false,message:'Suggestion must be at least 10 characters.'});
     const existing = db.prepare('SELECT * FROM fb_suggestions WHERE id=?').get(id);
     if (!existing) return res.status(404).json({success:false,message:'Suggestion not found.'});
+    const dbUser = getUserById.get(req.session.user.id);
+    if (dbUser && existing.department !== dbUser.department) return res.status(403).json({success:false,message:'Not authorized.'});
     if (existing.status !== 'draft') return res.status(400).json({success:false,message:'This suggestion is already confirmed and cannot be edited.'});
     const ca = existing.created_at || '';
     const submittedAt = new Date(ca.includes('Z') || ca.includes('+') ? ca : ca + 'Z');
@@ -1346,6 +1354,8 @@ app.delete('/api/suggestion/delete/:id', requireAuth, async (req, res) => {
   try {
     const existing = db.prepare('SELECT * FROM fb_suggestions WHERE id=?').get(req.params.id);
     if (!existing) return res.status(404).json({success:false,message:'Suggestion not found.'});
+    const dbUser = getUserById.get(req.session.user.id);
+    if (dbUser && existing.department !== dbUser.department) return res.status(403).json({success:false,message:'Not authorized.'});
     if (existing.status !== 'draft') return res.status(400).json({success:false,message:'This suggestion is already confirmed and cannot be deleted.'});
     const ca = existing.created_at || '';
     const submittedAt = new Date(ca.includes('Z') || ca.includes('+') ? ca : ca + 'Z');
@@ -1404,6 +1414,7 @@ app.post('/api/change-password', requireAuth, (req, res) => {
   try {
     const user = req.session.user;
     const dbUser = getUserById.get(user.id);
+    if (!dbUser) return res.status(401).json({success:false,message:'Session expired.'});
     const { currentPassword, newPassword } = req.body;
     if (!currentPassword||!newPassword) return res.status(400).json({success:false,message:'All fields required.'});
     if (!bcrypt.compareSync(currentPassword, dbUser.password_hash)) return res.status(401).json({success:false,message:'Current password is incorrect.'});
@@ -1484,9 +1495,15 @@ app.post('/api/company-feedback', requireAuth, async (req, res) => {
   try {
     const user = req.session.user;
     const dbUser = getUserById.get(user.id);
+    if (!dbUser) return res.status(401).json({success:false,message:'Session expired.'});
     const now = new Date();
     const monthStart = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-01`;
     const { job_satisfaction, salary_benefits, growth_training, team_teamwork, team_respect, comment } = req.body;
+
+    // Server-side validation: ratings must be integers 1-5
+    const companyVals = [job_satisfaction, salary_benefits, growth_training, team_teamwork, team_respect];
+    if (companyVals.some(v => { const n=parseInt(v); return isNaN(n)||n<1||n>5; }))
+      return res.status(400).json({success:false,message:'All ratings must be between 1 and 5.'});
 
     // Check if already submitted company rating this month
     const existing = db.prepare('SELECT id FROM fb_reviews WHERE reviewer_id=? AND target_type=\'company\' AND created_at>=?').get(user.id, monthStart);
@@ -1507,10 +1524,14 @@ app.post('/api/feedback', requireAuth, async (req, res) => {
   try {
     const user = req.session.user;
     const dbUser = getUserById.get(user.id);
+    if (!dbUser) return res.status(401).json({success:false,message:'Session expired.'});
     const now = new Date();
     const monthStart = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-01`;
     const { target_id, sup_communication, sup_support, sup_fairness, comment } = req.body;
     if (!target_id) return res.status(400).json({success:false,message:'Please select a supervisor to rate.'});
+    const supVals = [sup_communication, sup_support, sup_fairness];
+    if (supVals.some(v => { const n=parseInt(v); return isNaN(n)||n<1||n>5; }))
+      return res.status(400).json({success:false,message:'All ratings must be between 1 and 5.'});
     const existing = db.prepare('SELECT id FROM fb_reviews WHERE reviewer_id=? AND target_id=? AND created_at>=?').get(user.id, target_id, monthStart);
     if (existing) return res.status(400).json({success:false,message:'You already rated this supervisor this month.'});
 
@@ -1549,11 +1570,17 @@ app.post('/api/supervisor-review', requireAuth, (req, res) => {
   try {
     const user = req.session.user;
     const dbUser = getUserById.get(user.id);
+    if (!dbUser) return res.status(401).json({success:false,message:'Session expired.'});
     if (dbUser.role !== 'supervisor') return res.status(403).json({success:false,message:'Not a supervisor.'});
     const now = new Date();
     const monthStart = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-01`;
     const { reviews } = req.body;
     if (!reviews || !reviews.length) return res.status(400).json({success:false,message:'No reviews.'});
+    for (const r of reviews) {
+      const empVals = [r.emp_performance, r.emp_punctuality, r.emp_attitude, r.emp_initiative];
+      if (empVals.some(v => { const n=parseInt(v); return isNaN(n)||n<1||n>5; }))
+        return res.status(400).json({success:false,message:'All ratings must be between 1 and 5.'});
+    }
     // Check per-target monthly limit
     for (const r of reviews) {
       const already = db.prepare('SELECT id FROM fb_reviews WHERE reviewer_id=? AND target_id=? AND created_at>=?').get(user.id, r.target_id, monthStart);
@@ -1596,6 +1623,7 @@ app.post('/api/supervisor-review', requireAuth, (req, res) => {
 });
 
 // ── HR ADMIN ────────────────────────────────────────────────
+app.get('/admin', (req, res) => res.redirect('/admin/login'));
 app.get('/admin/login', (req, res) => {
   if (req.session && req.session.admin) return res.redirect('/admin/dashboard');
   res.send(`${pageHead('HR Admin Login')}
@@ -1634,7 +1662,7 @@ app.post('/api/admin-login', authLimiter, (req, res) => {
   } catch(e) { res.status(500).json({success:false,message:'Server error.'}); }
 });
 
-app.get('/admin/logout', (req, res) => { if(req.session) req.session.admin=null; res.redirect('/admin/login'); });
+app.get('/admin/logout', (req, res) => { if(req.session) { req.session.admin=null; req.session.destroy(); } res.redirect('/admin/login'); });
 
 // ── HR DASHBOARD ────────────────────────────────────────────
 app.get('/admin/dashboard', requireAdmin, (req, res) => {
@@ -2337,13 +2365,14 @@ app.get('/api/export/feedback-csv', requireAdmin, (req, res) => {
     const headers = ['Date','Department','Reviewer Role','Target Type','Job Satisfaction','Salary Benefits','Growth Training','Sup Communication','Sup Support','Sup Fairness','Team Teamwork','Team Respect','Emp Performance','Emp Punctuality','Emp Attitude','Emp Initiative','Comment','Sup Comment'];
     const csvRows = [headers.join(',')];
     for (const r of reviews) {
+      function csvField(v){if(v==null||v==='')return '';const s=String(v);return (s.includes(',')||s.includes('"')||s.includes('\n'))?'"'+s.replace(/"/g,'""')+'"':s;}
       const row = [
-        r.created_at, r.department, r.reviewer_role, r.target_type,
+        csvField(r.created_at), csvField(r.department), csvField(r.reviewer_role), csvField(r.target_type),
         r.job_satisfaction||'', r.salary_benefits||'', r.growth_training||'',
         r.sup_communication||'', r.sup_support||'', r.sup_fairness||'',
         r.team_teamwork||'', r.team_respect||'',
         r.emp_performance||'', r.emp_punctuality||'', r.emp_attitude||'', r.emp_initiative||'',
-        `"${(r.comment||'').replace(/"/g,'""')}"`, `"${(r.sup_comment||'').replace(/"/g,'""')}"`
+        csvField(r.comment), csvField(r.sup_comment)
       ];
       csvRows.push(row.join(','));
     }
@@ -2391,7 +2420,7 @@ app.get('/api/export/hr-report', requireAdmin, (req, res) => {
 
     // Recent anonymous comments
     const recentComments = filteredReviews.filter(r => r.comment).slice(0,10).map(r =>
-      `<tr><td>${new Date(r.created_at).toLocaleDateString('en-US',{month:'short',day:'numeric'})}</td><td>${escapeHtml(r.department)}</td><td>${r.target_type}</td><td>${escapeHtml(r.comment)}</td></tr>`
+      `<tr><td>${new Date(r.created_at).toLocaleDateString('en-US',{month:'short',day:'numeric'})}</td><td>${escapeHtml(r.department)}</td><td>${escapeHtml(r.target_type)}</td><td>${escapeHtml(r.comment)}</td></tr>`
     ).join('');
 
     // Employee of the Month
@@ -2550,7 +2579,7 @@ app.listen(PORT, async () => {
   console.log(`\n=============================================`);
   console.log(`  Watan First Digital — Feedback System v5`);
   console.log(`  Running at:  http://localhost:${PORT}`);
-  console.log(`  Admin:       admin@watanfirst.com / Admin123$`);
+  console.log(`  Admin:       admin@watanfirst.com`);
   console.log(`=============================================`);
   await loadFromSupabase();
   // Seed admin
@@ -2577,5 +2606,8 @@ app.listen(PORT, async () => {
     }
     console.log('[OK] Default departments seeded');
   }
+  // Auto-confirm draft suggestions older than 1 hour (every 5 minutes)
+  setInterval(autoConfirmDrafts, 5 * 60 * 1000);
+  console.log('[OK] Draft auto-confirm timer started (every 5 min)');
   console.log(`=============================================\n`);
 });
