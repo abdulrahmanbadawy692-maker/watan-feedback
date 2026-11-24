@@ -161,6 +161,7 @@ const getByDept = db.prepare('SELECT * FROM fb_users WHERE department=? AND is_a
 
 // ── Express Setup ───────────────────────────────────────────
 const app = express();
+app.set('trust proxy', 1);
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(session({ secret: SESSION_SECRET, resave: true, saveUninitialized: false, cookie: { maxAge: null, secure: process.env.NODE_ENV==='production', sameSite: 'lax' } }));
