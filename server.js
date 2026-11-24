@@ -589,6 +589,17 @@ app.get('/dashboard', requireAuth, (req, res) => {
   <div class="container">
     <h1 class="page-title" data-en="📊 Dashboard" data-ar="📊 لوحة التحكم">📊 Dashboard</h1>
 
+    ${allRatedThisMonth.length === 0 ? `
+    <div style="background:linear-gradient(135deg,rgba(255,193,7,0.12),rgba(255,107,122,0.06));border:1px solid rgba(255,193,7,0.4);border-radius:14px;padding:18px 22px;margin-bottom:20px;display:flex;align-items:center;gap:14px;animation:wfdPulseGlow 2s infinite;">
+      <span style="font-size:32px;">📝</span>
+      <div style="flex:1;">
+        <p style="font-size:15px;font-weight:700;color:#ffc107;" data-en="You haven't rated this month yet!" data-ar="لم تقم بالتقييم هذا الشهر بعد!">You haven't rated this month yet!</p>
+        <p style="font-size:12px;color:#a0b4cc;margin-top:4px;" data-en="Your anonymous feedback helps improve the company. Take a moment to share your thoughts below." data-ar="ملاحظاتك المجهولة تساعد في تحسين الشركة. خذ لحظة لمشاركة أفكارك أدناه.">Your anonymous feedback helps improve the company. Take a moment to share your thoughts below.</p>
+      </div>
+    </div>
+    <style>@keyframes wfdPulseGlow{0%,100%{box-shadow:0 0 8px rgba(255,193,7,0.1);}50%{box-shadow:0 0 18px rgba(255,193,7,0.25);}}</style>
+    ` : ''}
+
     <div style="display:flex;gap:12px;margin-bottom:24px;flex-wrap:wrap;">
       <div style="flex:1;min-width:150px;background:#132a45;border:1px solid rgba(77,166,255,0.2);border-radius:12px;padding:16px;text-align:center;">
         <p style="font-size:12px;color:#a0b4cc;" data-en="Your Role" data-ar="دورك">Your Role</p>
@@ -658,8 +669,9 @@ app.get('/dashboard', requireAuth, (req, res) => {
         ${starsHTML('team_respect','Do your colleagues treat each other with respect?','هل يتعامل زملاؤك مع بعضهم باحترام؟')}
 
         <div class="form-group" style="margin-top:20px;">
-          <label data-en="💬 What would you change to make the company better? (optional)" data-ar="💬 ما الذي تغيره لتحسين الشركة؟ (اختياري)">💬 What would you change to make the company better? (optional)</label>
-          <textarea id="company_comment" placeholder="Your suggestions..."></textarea>
+          <label data-en="💬 Why did you give this rating? What would you improve? (optional, anonymous)" data-ar="💬 لماذا أعطيت هذا التقييم؟ ما الذي تحسّنه؟ (اختياري، مجهول)">💬 Why did you give this rating? What would you improve? (optional, anonymous)</label>
+          <textarea id="company_comment" placeholder="e.g. I wish we had more training opportunities..." style="min-height:70px;"></textarea>
+          <p style="font-size:11px;color:#4a6a8a;margin-top:4px;" data-en="🔒 Your comment is 100% anonymous — HR sees the text, never your name." data-ar="🔒 تعليقك مجهول 100% — الموارد البشرية ترى النص فقط، أبداً اسمك.">🔒 Your comment is 100% anonymous — HR sees the text, never your name.</p>
         </div>
         <button class="btn btn-full" onclick="submitCompanyFeedback()" data-en="Submit Company Rating" data-ar="إرسال تقييم الشركة">Submit Company Rating</button>
       `}
@@ -698,8 +710,9 @@ app.get('/dashboard', requireAuth, (req, res) => {
           ${starsHTML('sup_support','Does this supervisor help when you face problems?','هل يساعدك هذا المشرف عند مواجهة المشاكل؟')}
           ${starsHTML('sup_fairness','Does this supervisor treat everyone equally?','هل يعامل هذا المشرف الجميع بعدالة؟')}
           <div class="form-group" style="margin-top:16px;">
-            <label data-en="💬 Additional comments about this supervisor (optional)" data-ar="💬 تعليقات إضافية عن هذا المشرف (اختياري)">💬 Additional comments about this supervisor (optional)</label>
-            <textarea id="person_comment" placeholder="Your feedback..."></textarea>
+            <label data-en="💬 Why did you give this rating? Any specific examples? (optional, anonymous)" data-ar="💬 لماذا أعطيت هذا التقييم؟ أي أمثلة محددة؟ (اختياري، مجهول)">💬 Why did you give this rating? Any specific examples? (optional, anonymous)</label>
+            <textarea id="person_comment" placeholder="e.g. My supervisor is great at listening but could give clearer instructions..." style="min-height:70px;"></textarea>
+            <p style="font-size:11px;color:#4a6a8a;margin-top:4px;" data-en="🔒 Your comment is 100% anonymous — HR sees the text, never your name." data-ar="🔒 تعليقك مجهول 100% — الموارد البشرية ترى النص فقط، أبداً اسمك.">🔒 Your comment is 100% anonymous — HR sees the text, never your name.</p>
           </div>
           <button class="btn btn-full" style="background:linear-gradient(135deg,#b08aef,#8b5cf6);" onclick="submitPersonFeedback()" data-en="Submit Supervisor Rating" data-ar="إرسال تقييم المشرف">Submit Supervisor Rating</button>
         </div>
@@ -740,8 +753,9 @@ app.get('/dashboard', requireAuth, (req, res) => {
         ${starsHTML('team_respect','Do your colleagues treat each other with respect?','هل يتعامل زملاؤك مع بعضهم باحترام؟')}
 
         <div class="form-group" style="margin-top:20px;">
-          <label data-en="💬 What would you change to make the company better? (optional)" data-ar="💬 ما الذي تغيره لتحسين الشركة؟ (اختياري)">💬 What would you change to make the company better? (optional)</label>
-          <textarea id="company_comment" placeholder="Your suggestions..."></textarea>
+          <label data-en="💬 Why did you give this rating? What would you improve? (optional, anonymous)" data-ar="💬 لماذا أعطيت هذا التقييم؟ ما الذي تحسّنه؟ (اختياري، مجهول)">💬 Why did you give this rating? What would you improve? (optional, anonymous)</label>
+          <textarea id="company_comment" placeholder="e.g. I wish we had more training opportunities..." style="min-height:70px;"></textarea>
+          <p style="font-size:11px;color:#4a6a8a;margin-top:4px;" data-en="🔒 Your comment is 100% anonymous — HR sees the text, never your name." data-ar="🔒 تعليقك مجهول 100% — الموارد البشرية ترى النص فقط، أبداً اسمك.">🔒 Your comment is 100% anonymous — HR sees the text, never your name.</p>
         </div>
         <button class="btn btn-full" onclick="submitCompanyFeedback()" data-en="Submit Company Rating" data-ar="إرسال تقييم الشركة">Submit Company Rating</button>
       `}
@@ -1779,6 +1793,7 @@ app.get('/admin/dashboard', requireAdmin, (req, res) => {
       </div>
       <div style="display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap;">
         <button class="btn" onclick="exportCSV()" style="padding:10px 18px;font-size:13px;" data-en="📥 Export CSV" data-ar="📥 تصدير CSV">📥 Export CSV</button>
+        <button class="btn" onclick="exportReport()" style="padding:10px 18px;font-size:13px;background:linear-gradient(135deg,#6f42c1,#b08aef);" data-en="📄 Export Report" data-ar="📄 تصدير تقرير">📄 Export Report</button>
         <button class="btn" onclick="sendReminder()" style="padding:10px 18px;font-size:13px;background:linear-gradient(135deg,#ffc107,#e6a800);" data-en="📧 Send Monthly Reminder" data-ar="📧 إرسال تذكير شهري">📧 Send Monthly Reminder</button>
       </div>
     </div>
@@ -2022,6 +2037,10 @@ app.get('/admin/dashboard', requireAdmin, (req, res) => {
   function exportCSV(){
     var dept=document.getElementById('deptFilter').value;
     window.location.href='/api/export/feedback-csv'+(dept?'?dept='+encodeURIComponent(dept):'');
+  }
+  function exportReport(){
+    var dept=document.getElementById('deptFilter').value;
+    window.location.href='/api/export/hr-report'+(dept?'?dept='+encodeURIComponent(dept):'');
   }
   async function hrDeleteSuggestion(id){
     var ov=document.createElement('div');ov.style.cssText='position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.5);z-index:99998;';
@@ -2333,6 +2352,107 @@ app.get('/api/export/feedback-csv', requireAdmin, (req, res) => {
     res.setHeader('Content-Disposition', `attachment; filename="feedback_export_${new Date().toISOString().slice(0,10)}.csv"`);
     res.send(csv);
   } catch(e) { console.error('[ERROR] CSV export:', e); res.status(500).json({success:false,message:'Export failed.'}); }
+});
+
+// ── EXPORT HR REPORT (Printable HTML) ──────────────────────
+app.get('/api/export/hr-report', requireAdmin, (req, res) => {
+  try {
+    const filterDept = req.query.dept || '';
+    const now = new Date();
+    const reportDate = now.toLocaleDateString('en-US', {year:'numeric',month:'long',day:'numeric'});
+    const monthStart = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-01`;
+    const allReviews = db.prepare('SELECT * FROM fb_reviews ORDER BY created_at DESC').all();
+    const filteredReviews = filterDept ? allReviews.filter(r => r.department === filterDept) : allReviews;
+    const companyReviews = filteredReviews.filter(r => r.target_type === 'company');
+    const personSupReviews = filteredReviews.filter(r => r.reviewer_role === 'employee' && r.target_type === 'supervisor');
+    const supReviews = filteredReviews.filter(r => r.reviewer_role === 'supervisor');
+    const allEmps = db.prepare('SELECT * FROM fb_users WHERE is_admin=0').all();
+    const departments = [...new Set(allEmps.map(u => u.department))];
+    const thisMonthReviews = filteredReviews.filter(r => r.created_at >= monthStart);
+    const totalResponded = new Set(thisMonthReviews.map(r => r.reviewer_id)).size;
+    const responsePct = allEmps.length ? Math.round(totalResponded/allEmps.length*100) : 0;
+
+    function avg(arr, field) { const v=arr.filter(r=>r[field]); return v.length?(v.reduce((s,r)=>s+r[field],0)/v.length).toFixed(1):'—'; }
+
+    const companyFields = [{k:'job_satisfaction',l:'Job Satisfaction'},{k:'salary_benefits',l:'Salary & Benefits'},{k:'growth_training',l:'Growth & Training'},{k:'team_teamwork',l:'Teamwork'},{k:'team_respect',l:'Respect'}];
+    const supFields = [{k:'sup_communication',l:'Communication'},{k:'sup_support',l:'Support'},{k:'sup_fairness',l:'Fairness'}];
+
+    const companyAvg = companyReviews.length ? (companyFields.reduce((s,f)=>{const v=companyReviews.filter(r=>r[f.k]);return s+(v.length?v.reduce((a,r)=>a+r[f.k],0)/v.length:0);},0)/companyFields.length).toFixed(1) : '—';
+    const personAvg = personSupReviews.length ? (supFields.reduce((s,f)=>{const v=personSupReviews.filter(r=>r[f.k]);return s+(v.length?v.reduce((a,r)=>a+r[f.k],0)/v.length:0);},0)/supFields.length).toFixed(1) : '—';
+
+    // Department breakdown
+    const deptRows = departments.map(dept => {
+      const dc = companyReviews.filter(r => r.department === dept);
+      const dAvg = dc.length ? (companyFields.reduce((s,f)=>{const v=dc.filter(r=>r[f.k]);return s+(v.length?v.reduce((a,r)=>a+r[f.k],0)/v.length:0);},0)/companyFields.length).toFixed(1) : '—';
+      const dEmps = allEmps.filter(u => u.department === dept).length;
+      const dResp = new Set(thisMonthReviews.filter(r => r.department === dept).map(r => r.reviewer_id)).size;
+      return `<tr><td>${escapeHtml(dept)}</td><td>${dEmps}</td><td>${dAvg}</td><td>${dEmps?Math.round(dResp/dEmps*100):0}%</td></tr>`;
+    }).join('');
+
+    // Recent anonymous comments
+    const recentComments = filteredReviews.filter(r => r.comment).slice(0,10).map(r =>
+      `<tr><td>${new Date(r.created_at).toLocaleDateString('en-US',{month:'short',day:'numeric'})}</td><td>${escapeHtml(r.department)}</td><td>${r.target_type}</td><td>${escapeHtml(r.comment)}</td></tr>`
+    ).join('');
+
+    // Employee of the Month
+    const eotm = getEmployeeOfTheMonth();
+
+    const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>HR Feedback Report — ${reportDate}</title>
+    <style>
+      *{margin:0;padding:0;box-sizing:border-box;}body{font-family:Arial,sans-serif;color:#222;padding:40px;max-width:900px;margin:0 auto;font-size:14px;}
+      h1{font-size:24px;color:#1a3a6b;border-bottom:3px solid #1a3a6b;padding-bottom:8px;margin-bottom:4px;}
+      h2{font-size:18px;color:#1a3a6b;margin:24px 0 10px;border-bottom:1px solid #ddd;padding-bottom:4px;}
+      .meta{font-size:12px;color:#666;margin-bottom:24px;}
+      .stats{display:flex;gap:16px;margin:16px 0;flex-wrap:wrap;}
+      .stat{flex:1;min-width:120px;border:1px solid #ddd;border-radius:8px;padding:14px;text-align:center;}
+      .stat .num{font-size:28px;font-weight:700;color:#1a3a6b;}.stat .lbl{font-size:11px;color:#666;margin-top:4px;}
+      table{width:100%;border-collapse:collapse;margin:10px 0;font-size:13px;}
+      th{background:#1a3a6b;color:#fff;padding:8px 10px;text-align:left;font-size:12px;}
+      td{padding:8px 10px;border-bottom:1px solid #eee;}
+      tr:nth-child(even){background:#f8f9fa;}
+      .eotm{background:#fff8e1;border:1px solid #ffc107;border-radius:8px;padding:14px;margin:10px 0;text-align:center;}
+      .eotm .name{font-size:18px;font-weight:700;color:#e6a800;}
+      .footer{margin-top:30px;padding-top:10px;border-top:1px solid #ddd;font-size:11px;color:#999;text-align:center;}
+      @media print{body{padding:20px;}.no-print{display:none;}}
+    </style></head><body>
+    <button class="no-print" onclick="window.print()" style="float:right;padding:10px 20px;background:#1a3a6b;color:#fff;border:none;border-radius:6px;cursor:pointer;font-weight:600;">🖨️ Print / Save PDF</button>
+    <h1>HR Feedback Report</h1>
+    <p class="meta">Generated: ${reportDate} ${filterDept ? '| Department: '+escapeHtml(filterDept) : '| All Departments'} | Watan First Digital</p>
+
+    <h2>Overview</h2>
+    <div class="stats">
+      <div class="stat"><div class="num">${companyReviews.length}</div><div class="lbl">Company Ratings</div></div>
+      <div class="stat"><div class="num">${personSupReviews.length}</div><div class="lbl">Supervisor Ratings</div></div>
+      <div class="stat"><div class="num">${supReviews.length}</div><div class="lbl">Employee Ratings</div></div>
+      <div class="stat"><div class="num">${allEmps.length}</div><div class="lbl">Total Staff</div></div>
+      <div class="stat"><div class="num">${responsePct}%</div><div class="lbl">Response Rate</div></div>
+    </div>
+
+    <h2>Average Ratings</h2>
+    <div class="stats">
+      <div class="stat"><div class="num">${companyAvg}</div><div class="lbl">Company Avg (out of 5)</div></div>
+      <div class="stat"><div class="num">${personAvg}</div><div class="lbl">Supervisor Avg (out of 5)</div></div>
+    </div>
+    <table><thead><tr><th>Category</th><th>Average</th></tr></thead><tbody>
+      ${companyFields.map(f => `<tr><td>🏢 ${f.l}</td><td>${avg(companyReviews,f.k)}</td></tr>`).join('')}
+      ${supFields.map(f => `<tr><td>👤 ${f.l}</td><td>${avg(personSupReviews,f.k)}</td></tr>`).join('')}
+    </tbody></table>
+
+    ${eotm ? `<h2>Employee of the Month — ${escapeHtml(eotm.month)}</h2>
+    <div class="eotm">🏆 <span class="name">${escapeHtml(eotm.name)}</span> — ${escapeHtml(eotm.department)} — ${eotm.avg}/5 ★ (${eotm.ratings} rating(s))</div>` : ''}
+
+    <h2>Department Breakdown</h2>
+    <table><thead><tr><th>Department</th><th>Staff</th><th>Avg Rating</th><th>Response Rate</th></tr></thead><tbody>${deptRows || '<tr><td colspan="4">No data</td></tr>'}</tbody></table>
+
+    ${recentComments ? `<h2>Recent Anonymous Comments</h2>
+    <table><thead><tr><th>Date</th><th>Dept</th><th>Type</th><th>Comment</th></tr></thead><tbody>${recentComments}</tbody></table>` : ''}
+
+    <div class="footer">Watan First Digital — Employee Feedback System — Confidential HR Report</div>
+    </body></html>`;
+
+    res.setHeader('Content-Type', 'text/html');
+    res.send(html);
+  } catch(e) { console.error('[ERROR] HR Report export:', e); res.status(500).json({success:false,message:'Report export failed.'}); }
 });
 
 // ── SEND MONTHLY REMINDER ──────────────────────────────────
